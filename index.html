@@ -36,13 +36,27 @@
   .logo{ width:38px; height:38px; border-radius:12px; background:linear-gradient(135deg,var(--accent),#a78bfa); display:grid; place-items:center; color:#001018; font-weight:800; box-shadow:var(--shadow) }
   h1{ margin:0; font-size:clamp(1.1rem,3.3vw,1.6rem); letter-spacing:.2px }
   .muted{ color:var(--muted) } .small{ font-size:.92rem }
-  .toolbar{ display:flex; gap:8px; flex-wrap:wrap; width:100%; align-items:center; }
-  .search{ flex:1 1 280px; display:flex; gap:8px; align-items:center; background:var(--card); padding:8px; border-radius:14px; box-shadow:var(--shadow); border:1px solid transparent; }
+
+  .toolbar{ display:flex; gap:8px; flex-wrap:wrap; width:100%; align-items:center; position:relative; }
+  .search{ position:relative; flex:1 1 280px; display:flex; gap:8px; align-items:center; background:var(--card); padding:8px; border-radius:14px; box-shadow:var(--shadow); border:1px solid transparent; }
   .search:focus-within{ outline:2px solid var(--ring); border-color:transparent }
   .search input{ flex:1; border:0; background:transparent; color:var(--text); font-size:16px; padding:10px; outline:none; }
   .btn{ border:0; padding:10px 14px; border-radius:12px; font-weight:600; cursor:pointer; transition:.2s transform ease,.2s background ease,.2s opacity ease; background:var(--accent); color:#001018; box-shadow:var(--shadow) }
   .btn:hover{ transform:translateY(-1px) }
   .btn.secondary{ background:#334155; color:#e5e7eb } @media (prefers-color-scheme: light){ .btn.secondary{ background:#e2e8f0; color:#0f172a } }
+
+  /* Autocomplete */
+  .ac{
+    position:absolute; left:8px; right:8px; top:100%; margin-top:6px;
+    background:var(--card); border:1px solid #ffffff22; border-radius:12px; box-shadow:var(--shadow); overflow:hidden; z-index:50;
+    display:none;
+  }
+  .ac.show{ display:block; }
+  .ac-item{ padding:10px 12px; display:flex; justify-content:space-between; gap:12px; cursor:pointer; }
+  .ac-item:hover{ background:#ffffff10; }
+  .ac-name{ font-weight:700 }
+  .ac-sub{ color:var(--muted); font-size:.92rem }
+
   .grid{ display:grid; gap:16px; grid-template-columns:1fr }
   @media (min-width:820px){ .grid{ grid-template-columns:1.1fr .9fr } }
   .card{ background:var(--card); border:1px solid #ffffff10; border-radius:var(--radius); box-shadow:var(--shadow); padding:16px }
@@ -67,7 +81,7 @@
   /* SVG ikonok színe fixen a szövegszín: */
   #currentIcon svg, .tile svg, .dayrow svg { color: var(--text); }
 
-  /* --- RADAR --- */
+  /* Radar */
   .map-card{ padding:0; overflow:hidden }
   .map-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 12px 0 12px }
   .map{ position:relative; height:420px; background:#0b1220; touch-action:pinch-zoom pan-x pan-y; user-select:none; overflow:hidden; border-radius:0 0 var(--radius) var(--radius) }
@@ -107,11 +121,13 @@
   <div class="toolbar">
     <label class="search" for="q">
       <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M21 20.3 17.2 16.5a8 8 0 1 0-1 1L20.3 21zM5 11a6 6 0 1 1 12 0A6 6 0 0 1 5 11"/></svg>
-      <input id="q" type="search" placeholder="Város keresése (pl. Budapest)" autocomplete="off" />
+      <input id="q" type="search" placeholder="Város/település keresése (pl. Budapest, Pécs, Debrecen)" autocomplete="off" />
       <button class="btn" id="searchBtn" type="button">Keresés</button>
+      <!-- Autocomplete panel -->
+      <div class="ac" id="ac"></div>
     </label>
     <button class="btn secondary" id="geoBtn" type="button" title="Saját helyzetem">Saját helyzetem</button>
-    <button class="btn secondary" id="installBtn" type="button" title="Telepítés (PWA)" class="hidden">Telepítés</button>
+    <button class="btn secondary hidden" id="installBtn" type="button" title="Telepítés (PWA)">Telepítés</button>
   </div>
 
   <section class="grid" id="content">
@@ -203,6 +219,7 @@
 <script>
 (() => {
   const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
 
   /* ===== ÁLLAPOT ===== */
   const state = {
@@ -210,7 +227,8 @@
     place:null, data:null,
     map:{ z:6, x:19.0408, y:47.4979, dragging:false, last:null }, // Budapest default
     radar:{ frames:[], idx:0, playing:true, timer:null },
-    deferredPrompt:null
+    deferredPrompt:null,
+    acResults:[] // autocomplete cache
   };
 
   /* ===== TÉMA ===== */
@@ -242,27 +260,93 @@
     persist();
   }
 
-  /* ===== KERESŐ / GEO ===== */
+  /* ===== KERESŐ / GEO + AUTOCOMPLETE ===== */
+  const q = $('#q'), ac = $('#ac');
   $('#searchBtn').onclick = onSearch;
-  $('#q').addEventListener('keydown', e=>{ if(e.key==='Enter') onSearch(); });
+  q.addEventListener('keydown', e=>{
+    if(e.key==='Enter'){
+      e.preventDefault();
+      if(state.acResults.length){ pickPlace(0); } else { onSearch(); }
+    }
+    if(e.key==='Escape'){ hideAC(); }
+  });
+  q.addEventListener('input', debounce(onType, 220));
+  q.addEventListener('focus', ()=>{ if(state.acResults.length) showAC(); });
+
   $('#geoBtn').onclick = useGeolocation;
 
+  // betöltéskor
   const saved = localStorage.getItem('weather:last');
   if(saved){
     try{ const last = JSON.parse(saved); if(last.units) setUnits(last.units,true); if(last.place){ state.place=last.place; fetchAll(); mapCenter(last.place.lat,last.place.lon,7);} }
     catch{}
   }else{
-    useGeolocation(); // ha nem engedélyezett, marad a default BP és kézi keresés
+    useGeolocation();
+  }
+
+  async function onType(){
+    const term = normalize(q.value.trim());
+    if(term.length < 2){ hideAC(); return; }
+    try{
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(term)}&count=5&language=hu&format=json`;
+      const res = await fetch(url);
+      if(!res.ok) throw new Error('geocoding');
+      const geo = await res.json();
+      const list = (geo.results||[]).map(r=>({
+        name: r.name,
+        admin1: r.admin1 || '',
+        country: r.country || r.country_code || '',
+        cc: r.country_code || '',
+        lat: r.latitude, lon: r.longitude, timezone: r.timezone
+      }));
+      state.acResults = list;
+      renderAC(list);
+    }catch(err){
+      console.error(err);
+      state.acResults = [];
+      hideAC();
+    }
+  }
+
+  function renderAC(list){
+    if(!list.length){ hideAC(); return; }
+    ac.innerHTML = list.map((r,i)=>`
+      <div class="ac-item" data-i="${i}">
+        <div>
+          <div class="ac-name">${flag(r.cc)} ${escapeHTML(r.name)}</div>
+          <div class="ac-sub">${escapeHTML([r.admin1, r.country].filter(Boolean).join(', '))}</div>
+        </div>
+        <div class="ac-sub">lat ${r.lat.toFixed(2)}, lon ${r.lon.toFixed(2)}</div>
+      </div>
+    `).join('');
+    $$('#ac .ac-item').forEach(el=>{
+      el.onclick = () => pickPlace(Number(el.dataset.i));
+    });
+    showAC();
+  }
+  function showAC(){ ac.classList.add('show'); }
+  function hideAC(){ ac.classList.remove('show'); }
+
+  async function pickPlace(i){
+    const r = state.acResults[i];
+    if(!r) return;
+    state.place = { name:r.name, country:r.cc||r.country, admin1:r.admin1||'', lat:r.lat, lon:r.lon, timezone:r.timezone };
+    q.value = `${r.name}${r.admin1?`, ${r.admin1}`:''}${r.country?`, ${r.country}`:''}`;
+    hideAC(); persist();
+    await fetchAll();
+    mapCenter(r.lat, r.lon, 8);
   }
 
   async function onSearch(){
-    const term = $('#q').value.trim();
-    if(!term) return shake($('#q'));
+    const termRaw = q.value.trim();
+    if(!termRaw){ return shake(q); }
     try{
-      const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(term)}&count=1&language=hu&format=json`);
+      // ugyanúgy az Open-Meteo geokódolót használjuk, 1 legjobb találat
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(termRaw)}&count=1&language=hu&format=json`;
+      const res = await fetch(url);
       if(!res.ok) throw new Error('geocoding');
       const geo = await res.json();
-      if(!geo.results?.length) return toast('Nem található ilyen város.', 'warn');
+      if(!geo.results?.length) return toast('Nem található ilyen település.', 'warn');
       const r = geo.results[0];
       state.place = { name:r.name, country:r.country_code||r.country, admin1:r.admin1||'', lat:r.latitude, lon:r.longitude, timezone:r.timezone };
       persist();
@@ -382,7 +466,7 @@
     el.textContent = msg;
     el.style.position='fixed'; el.style.left='50%'; el.style.bottom='22px'; el.style.transform='translateX(-50%)';
     el.style.background= kind==='ok'? '#10b981' : kind==='warn'? '#f59e0b' : '#ef4444';
-    el.style.color='#001018'; el.style.padding='10px 14px'; el.style.borderRadius='999px'; el.style.boxShadow:'0 10px 30px rgba(0,0,0,.35)'; el.style.fontWeight='700';
+    el.style.color='#001018'; el.style.padding='10px 14px'; el.style.borderRadius='999px'; el.style.boxShadow='0 10px 30px rgba(0,0,0,.35)'; el.style.fontWeight='700';
     el.style.zIndex=9999; el.style.opacity='0'; el.style.transition='opacity .2s ease';
     document.body.appendChild(el); requestAnimationFrame(()=> el.style.opacity='1');
     setTimeout(()=>{ el.style.opacity='0'; setTimeout(()=>el.remove(),200); }, ms);
@@ -421,14 +505,21 @@
   }
   function persist(){ localStorage.setItem('weather:last', JSON.stringify({ units:state.units, place:state.place })); }
 
+  /* ===== Helper: autocomplete ===== */
+  function normalize(s){ return s.normalize('NFKD').replace(/[\u0300-\u036f]/g,''); } // ékezet-sztrippelés
+  function escapeHTML(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+  function debounce(fn,ms){ let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); }; }
+  function flag(cc){
+    if(!cc) return '🌍';
+    const u = cc.toUpperCase();
+    return String.fromCodePoint(...[...u].map(c=>0x1F1E6 + c.charCodeAt(0)-65));
+  }
+
   /* ===== TÉRKÉP (slippy) ===== */
   const map = $('#map'), baseLayer = $('#baseLayer'), radarLayer = $('#radarLayer'), dotsEl = $('#dots'), timeLabel = $('#timeLabel');
   const osm = (z,x,y)=>`https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
   const lon2x = (lon,z)=> ((lon+180)/360)*Math.pow(2,z);
   const lat2y = (lat,z)=>{ const r=lat*Math.PI/180, n=Math.pow(2,z); return (1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n; };
-  const x2lon = (x,z)=> x/Math.pow(2,z)*360-180;
-  const y2lat = (y,z)=>{ const n=Math.PI-2*Math.PI*y/Math.pow(2,z); return 180/Math.PI*Math.atan(0.5*(Math.exp(n)-Math.exp(-n))); };
-
   function mapCenter(lat,lon,z=7){ state.map.z=z; state.map.x=lon; state.map.y=lat; renderMap(); }
   function renderMap(){
     const { z } = state.map;
@@ -461,7 +552,7 @@
       }
     }
     drawLayer(baseLayer, osm);
-    drawRadar(); // aktuális frame
+    drawRadar();
   }
   $('#zoomIn').onclick = ()=>{ state.map.z = Math.min(12, state.map.z+1); renderMap(); };
   $('#zoomOut').onclick = ()=>{ state.map.z = Math.max(2, state.map.z-1); renderMap(); };
