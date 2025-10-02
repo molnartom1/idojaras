@@ -362,7 +362,7 @@
     }, ()=> toast('Nem sikerült lekérni a helyzeted.','warn'), { enableHighAccuracy:false, timeout:10000, maximumAge:60000 });
   }
 
-  /* ===== Open-Meteo előrejelzés ===== */
+  /* ===== Open-Meteo előrejelzés – robusztus, retry-val ===== */
   async function fetchAll(){
     if(!state.place){ toast('Nincs hely kiválasztva.','warn'); return; }
     skeleton(true);
@@ -371,18 +371,43 @@
     const tempUnit = state.units==='metric'?'celsius':'fahrenheit';
     const windUnit = state.units==='metric'?'kmh':'mph';
 
-    const url = new URL('https://api.open-meteo.com/v1/forecast');
-    url.search = new URLSearchParams({
-      latitude: lat, longitude: lon, timeformat:'iso8601',
-      current:'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,surface_pressure,wind_speed_10m',
-      hourly:'temperature_2m,precipitation_probability,weather_code,wind_speed_10m',
-      daily:'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,wind_speed_10m_max',
-      timezone, temperature_unit: tempUnit, wind_speed_unit: windUnit, forecast_days: 7
-    }).toString();
+    const paramsFull = {
+      latitude: lat, longitude: lon, timeformat:'iso8601', timezone,
+      temperature_unit: tempUnit, wind_speed_unit: windUnit, forecast_days: 7, past_days: 0,
+      models: 'best_match',
+      current: [
+        'temperature_2m','relative_humidity_2m','apparent_temperature',
+        'is_day','weather_code','surface_pressure','wind_speed_10m'
+      ].join(','),
+      hourly: [
+        'temperature_2m','weather_code','wind_speed_10m',
+        'precipitation','precipitation_probability','rain','showers','snowfall'
+      ].join(','),
+      daily: [
+        'weather_code','temperature_2m_max','temperature_2m_min',
+        'sunrise','sunset','precipitation_sum','precipitation_probability_max','wind_speed_10m_max'
+      ].join(',')
+    };
 
     try{
-      const res = await xfetch(url);
-      const data = await res.json();
+      let data = await fetchOpenMeteo(paramsFull);
+
+      const hourlyMissing = !data.hourly || !Array.isArray(data.hourly.time) || !data.hourly.time.length;
+      const dailyMissing  = !data.daily  || !Array.isArray(data.daily.time)  || !data.daily.time.length;
+
+      if(hourlyMissing || dailyMissing){
+        const paramsLight = {
+          latitude: lat, longitude: lon, timeformat:'iso8601', timezone,
+          temperature_unit: tempUnit, wind_speed_unit: windUnit, forecast_days: 7, past_days: 0,
+          models: 'best_match',
+          current: 'temperature_2m,apparent_temperature,is_day,weather_code,wind_speed_10m,surface_pressure,relative_humidity_2m',
+          hourly: 'temperature_2m,weather_code,wind_speed_10m,precipitation',
+          daily: 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,wind_speed_10m_max'
+        };
+        console.warn('[Open-Meteo] Fallback paraméterekre váltok…');
+        data = await fetchOpenMeteo(paramsLight);
+      }
+
       state.data = data;
       state.tz = data.timezone || timezone;
       renderAll();
@@ -395,6 +420,15 @@
       $('#daily').innerHTML  = '<div class="muted small" style="padding:8px">Nincs napi adat.</div>';
       toast('Nem sikerült lekérni az előrejelzést (Open-Meteo).','err');
     }
+  }
+
+  async function fetchOpenMeteo(params){
+    const url = new URL('https://api.open-meteo.com/v1/forecast');
+    url.search = new URLSearchParams(params).toString();
+    const res = await xfetch(url);
+    const data = await res.json();
+    if(!data) throw new Error('Üres válasz az Open-Meteo-tól');
+    return data;
   }
 
   function renderAll(){
@@ -418,7 +452,7 @@
     if(d0.sunrise && d0.sunrise.length){ $('#sunrise').textContent = formatTime(d0.sunrise[0]); }
     if(d0.sunset && d0.sunset.length){ $('#sunset').textContent  = formatTime(d0.sunset[0]); }
 
-    // ÓRÁK – 24 elem
+    // ÓRÁS – 24 elem
     const H = data.hourly || {};
     if(H.time && H.time.length){
       const nowIso = (data.current && data.current.time) ? data.current.time : new Date().toISOString();
@@ -443,7 +477,7 @@
       $('#hourly').innerHTML = '<div class="muted small" style="padding:8px">Nincs órás adat.</div>';
     }
 
-    // NAPOK – 7 nap
+    // NAPI – 7 nap
     if(d0.time && d0.time.length){
       const rows = [];
       for(let j=0;j<d0.time.length;j++){
@@ -462,7 +496,7 @@
       $('#daily').innerHTML = '<div class="muted small" style="padding:8px">Nincs napi adat.</div>';
     }
 
-    // radar újrarajzolása is indul
+    // radar újrarajzolása
     resizeCanvases(); drawBase(); drawRadar();
   }
 
@@ -516,6 +550,7 @@
       '</div><div class="row" style="display:flex; align-items:center; gap:6px"><strong>'+o.tmax+'°</strong> <span class="muted">/</span> <span class="muted">'+o.tmin+'°</span></div>'+
       '<div class="muted small">Szél: '+o.wind+' '+windUnit+'</div></div>';
   }
+
   function describeWMO(code){
     const m = {0:'Derült',1:'Többnyire derült',2:'Változó felhőzet',3:'Borult',45:'Köd',48:'Zúzmarás köd',
       51:'Gyenge szitálás',53:'Mérsékelt szitálás',55:'Erős szitálás',56:'Gyenge ónos szitálás',57:'Erős ónos szitálás',
@@ -652,7 +687,6 @@
   resizeCanvases(); drawBase(); loadFrames();
 
   /* ===== kis utilok ===== */
-  function svgUse(id,size,cls){ if(size===void 0) size=48; if(!cls) cls=''; return '<svg class="'+cls+'" width="'+size+'" height="'+size+'" viewBox="0 0 24 24" aria-hidden="true"><use href="#'+id+'"/></svg>'; }
   function formatTimeUnix(sec, tz){ return new Date(sec*1000).toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit', timeZone: tz}); }
   function niceDateUnix(sec, tz){ return new Date(sec*1000).toLocaleDateString('hu-HU',{month:'short',day:'2-digit',weekday:'short', timeZone: tz}); }
   function persist(){ localStorage.setItem('weather:last', JSON.stringify({ units:state.units, place:state.place })); }
