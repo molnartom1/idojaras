@@ -23,7 +23,7 @@
 
   *{box-sizing:border-box}
   html,body{height:100%}
-  html, body { overflow-x: hidden; }  /* ne legyen vízszintes túlnyúlás */
+  html, body { overflow-x: hidden; }
 
   body{
     margin:0; font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",Arial,"Noto Sans";
@@ -78,7 +78,7 @@
   .seg.active{ background:var(--accent); color:#001018; font-weight:700 }
   .badge{ font-size:.8rem; padding:.2rem .5rem; border-radius:999px; background:#ffffff10; border:1px solid #ffffff22 }
 
-  /* SZÍNES ikonok – az SVG a wc-* osztály színét veszi fel */
+  /* SZÍNES ikonok */
   .wc-sun{ color:#fbbf24 }     /* napos */
   .wc-night{ color:#93c5fd }   /* derült éj */
   .wc-partly{ color:#fde68a }  /* gomolyfelhős */
@@ -93,12 +93,18 @@
     .wc-cloud{ color:#64748b } .wc-mist{ color:#64748b } .wc-snow{ color:#2563eb }
   }
 
-  /* Radar – seam fix (ne legyen rács) */
+  /* Radar – agresszív seam fix (1px overlap) */
   .map-card{ padding:0; overflow:hidden }
   .map-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 12px 0 12px }
   .map{ position:relative; height:420px; background:#0b1220; touch-action:pinch-zoom pan-x pan-y; user-select:none; overflow:hidden; border-radius:0 0 var(--radius) var(--radius) }
-  .map .layer{ position:absolute; top:0; left:0; transform-origin:0 0; image-rendering:crisp-edges; will-change:transform; transform: translateZ(0); }
-  .map .tile{ position:absolute; width:256.5px; height:256.5px; margin:-0.25px 0 0 -0.25px; display:block; transform: translateZ(0); image-rendering:auto; }
+  .map .layer{ position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform; transform: translateZ(0); }
+  .map .tile{
+    position:absolute;
+    width:257px; height:257px;       /* 1px-szel nagyobb, hogy fél-fél px-et átfedjen */
+    margin:-0.5px 0 0 -0.5px;        /* eltolás az átfedéshez */
+    display:block; pointer-events:none;
+    image-rendering:auto; transform: translateZ(0);
+  }
   @supports (filter: brightness(1)){
     .map .tile{ filter: brightness(1.0001); } /* subpixel seam hack */
   }
@@ -233,7 +239,7 @@
   const $ = s => document.querySelector(s);
   const $$ = s => Array.from(document.querySelectorAll(s));
 
-  /* ===== CORS/ORB-safe fetch ===== */
+  /* CORS/ORB-safe fetch */
   async function xfetch(url, opts){
     opts = opts || {};
     try{
@@ -256,7 +262,7 @@
     radar:{ frames:[], idx:0, playing:true, timer:null }
   };
 
-  /* ===== Téma ===== */
+  /* Téma */
   function applyTheme(){
     const root=document.documentElement;
     root.removeAttribute('data-force');
@@ -274,7 +280,7 @@
     $('#themeDark').onclick  = ()=>{ state.theme='dark';  applyTheme(); };
   })();
 
-  /* ===== Egységek ===== */
+  /* Egységek */
   $('#unitC').onclick = ()=> setUnits('metric');
   $('#unitF').onclick = ()=> setUnits('imperial');
   function setUnits(u, silent){
@@ -285,7 +291,7 @@
     persist();
   }
 
-  /* ===== Keresés + geokódoló (Open-Meteo) ===== */
+  /* Keresés + geokódoló */
   const q = $('#q'), ac = $('#ac');
   $('#searchBtn').onclick = onSearch;
   q.addEventListener('keydown', e=>{
@@ -362,7 +368,7 @@
     }, ()=> toast('Nem sikerült lekérni a helyzeted.','warn'), { enableHighAccuracy:false, timeout:10000, maximumAge:60000 });
   }
 
-  /* ===== Open-Meteo előrejelzés ===== */
+  /* Open-Meteo előrejelzés */
   async function fetchAll(){
     if(!state.place){ toast('Nincs hely kiválasztva.','warn'); return; }
     skeleton(true);
@@ -463,7 +469,7 @@
     }
   }
 
-  /* ===== UI helpers ===== */
+  /* UI helpers */
   function skeleton(active){
     $('#temp').textContent = active ? '—°' : $('#temp').textContent;
     $('#updated').textContent = active ? 'Frissítés…' : 'Most frissítve';
@@ -521,7 +527,7 @@
       '<div class="muted small">Szél: '+o.wind+' '+windUnit+'</div></div>';
   }
 
-  /* ===== Ikon mapping + színosztály ===== */
+  /* Ikon mapping + színosztály */
   function pickIcon(code,isDay){
     if(code===0) return isDay?'i-clear-day':'i-clear-night';
     if(code===1||code===2) return 'i-partly';
@@ -556,7 +562,7 @@
   }
   function persist(){ localStorage.setItem('weather:last', JSON.stringify({ units:state.units, place:state.place })); }
 
-  /* ===== OSM + RainViewer radar (seam-fixelt) ===== */
+  /* OSM + RainViewer radar (257px overlap, floor pozicionálás) */
   const map = $('#map'), baseLayer = $('#baseLayer'), radarLayer = $('#radarLayer'), dotsEl = $('#dots'), timeLabel = $('#timeLabel');
   const osm = (z,x,y)=>`https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
   const lon2x = (lon,z)=> ((lon+180)/360)*Math.pow(2,z);
@@ -654,7 +660,65 @@
   $('#radarPlay').onclick = play; $('#radarPause').onclick = pause; $('#radarNow').onclick = ()=>{ radar.idx=Math.max(0,radar.frames.length-1); drawRadar(); };
   loadFrames();
 
-  /* ===== apró utilok ===== */
+  /* apró utilok */
+  function skeleton(active){
+    $('#temp').textContent = active ? '—°' : $('#temp').textContent;
+    $('#updated').textContent = active ? 'Frissítés…' : 'Most frissítve';
+    if(active){
+      $('#hourly').innerHTML = Array(6).fill(0).map(()=>`<div class="tile"><div class="skeleton" style="width:58px;height:58px;border-radius:12px;background:linear-gradient(90deg,#ffffff10,#ffffff22,#ffffff10);background-size:200% 100%;animation:shimmer 1.4s infinite"></div><div class="skeleton" style="width:60px;height:10px;background:#ffffff22;border-radius:8px"></div><div class="skeleton" style="width:40px;height:10px;background:#ffffff22;border-radius:8px"></div></div>`).join('');
+      $('#daily').innerHTML  = Array(5).fill(0).map(()=>`<div class="dayrow"><div class="skeleton" style="width:120px;height:12px;background:#ffffff22;border-radius:8px"></div><div class="skeleton" style="width:50px;height:12px;background:#ffffff22;border-radius:8px"></div><div class="skeleton" style="width:70px;height:12px;background:#ffffff22;border-radius:8px"></div><div class="skeleton" style="width:60px;height:12px;background:#ffffff22;border-radius:8px"></div></div>`).join('');
+    }
+  }
+  function toast(msg, kind='ok', ms=1800){
+    const el = document.createElement('div');
+    el.textContent = msg;
+    el.style.position='fixed'; el.style.left='50%'; el.style.bottom='22px'; el.style.transform='translateX(-50%)';
+    el.style.background= kind==='ok'? '#10b981' : kind==='warn'? '#f59e0b' : '#ef4444';
+    el.style.color='#001018'; el.style.padding='10px 14px'; el.style.borderRadius='999px'; el.style.boxShadow='0 10px 30px rgba(0,0,0,.35)'; el.style.fontWeight='700';
+    el.style.zIndex=9999; el.style.opacity='0'; el.style.transition='opacity .2s ease';
+    document.body.appendChild(el); requestAnimationFrame(()=> el.style.opacity='1');
+    setTimeout(()=>{ el.style.opacity='0'; setTimeout(()=>el.remove(),200); }, ms);
+  }
+  function shake(input){
+    const el = input.closest('.search');
+    el.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],{duration:260});
+    input.focus();
+  }
+  function svgUse(id,size,cls){
+    if(size===void 0) size=48; if(!cls) cls='';
+    return '<svg class="'+cls+'" width="'+size+'" height="'+size+'" viewBox="0 0 24 24" aria-hidden="true"><use href="#'+id+'"/></svg>';
+  }
+  function safeRound(x){ const n=Number(x); return isFinite(n)?Math.round(n):'—'; }
+  function pad(n){ return n<10?'0'+n:n; }
+  function formatTime(s){ const d=new Date(s); return pad(d.getHours())+':'+pad(d.getMinutes()); }
+  function niceDate(s){ const d=new Date(s); return d.toLocaleDateString('hu-HU',{month:'short',day:'2-digit',weekday:'short'}); }
+  function nearestIndex(arr, iso){ const now=+new Date(iso); let i=-1; for(let k=0;k<arr.length;k++){ if(+new Date(arr[k])>=now){ i=k; break; } } return i<0?0:i; }
+  function guessIsDay(iso, sr, ss){ const t=+new Date(iso), a=+new Date(sr), b=+new Date(ss); return t>=a && t<b; }
+  function tileHour(o){
+    const label = new Date(o.time).toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit'});
+    const popLine = (o.pop!=null)?('Csap.: '+o.pop+'%'):'\u00A0';
+    const windUnit = (state.units==='metric'?'km/h':'mph');
+    return '<div class="tile" title="'+label+'">'+
+      svgUse(pickIcon(o.wcode, o.isDay),40, iconClass(o.wcode,o.isDay))+
+      '<div><strong>'+o.temp+'°</strong></div>'+
+      '<div class="muted small">'+label+'</div>'+
+      '<div class="muted small">'+popLine+'</div>'+
+      '<div class="muted small">Szél: '+o.wind+' '+windUnit+'</div>'+
+    '</div>';
+  }
+  function rowDay(o){
+    const name = new Date(o.date).toLocaleDateString('hu-HU',{weekday:'long'});
+    const windUnit = (state.units==='metric'?'km/h':'mph');
+    const popTxt = (o.pop!=null)?('Csap.: '+o.pop+'%'):'—';
+    return '<div class="dayrow"><div class="row" style="display:flex; gap:12px">'+
+      svgUse(pickIcon(o.wcode,true),26, iconClass(o.wcode,true))+
+      '<div><strong>'+name+'</strong><div class="muted small">'+new Date(o.date).toLocaleDateString('hu-HU',{month:'long',day:'2-digit'})+'</div></div>'+
+      '</div><div class="muted small">'+popTxt+
+      '</div><div class="row" style="display:flex; align-items:center; gap:6px"><strong>'+o.tmax+'°</strong> <span class="muted">/</span> <span class="muted">'+o.tmin+'°</span></div>'+
+      '<div class="muted small">Szél: '+o.wind+' '+windUnit+'</div></div>';
+  }
+
+  /* kis segédek (nem közvetlenül használt, de jól jön) */
   function formatTimeUnix(sec, tz){ return new Date(sec*1000).toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit', timeZone: tz}); }
   function niceDateUnix(sec, tz){ return new Date(sec*1000).toLocaleDateString('hu-HU',{month:'short',day:'2-digit',weekday:'short', timeZone: tz}); }
 
