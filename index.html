@@ -220,18 +220,49 @@
   const $ = s => document.querySelector(s);
   const $$ = s => Array.from(document.querySelectorAll(s));
 
-  /* ===== CORS/ORB-safe fetch – egyszerű, bevált ===== */
+  /* ===== Alap fetch más dolgokra (radar JSON stb.) ===== */
   async function xfetch(url, opts){
     opts = opts || {};
+    const base = Object.assign({mode:'cors', referrerPolicy:'no-referrer', credentials:'omit'}, opts);
     try{
-      const res = await fetch(url, Object.assign({mode:'cors', referrerPolicy:'no-referrer'}, opts));
+      const res = await fetch(url, base);
       if(!res.ok) throw new Error('HTTP '+res.status);
       return res;
     }catch(e){
       const proxy = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
-      const res2 = await fetch(proxy, {mode:'cors', referrerPolicy:'no-referrer'});
+      const res2 = await fetch(proxy, {mode:'cors', referrerPolicy:'no-referrer', credentials:'omit'});
       if(!res2.ok) throw new Error('Proxy HTTP '+res2.status);
       return res2;
+    }
+  }
+
+  /* ===== Kifejezetten JSON letöltés erős proxy-lánccal (Open-Meteo) ===== */
+  async function xfetchJSONStrong(url){
+    const headers = {'Accept':'application/json'};
+    // 1) közvetlen
+    try{
+      const r = await fetch(url, {mode:'cors', referrerPolicy:'no-referrer', credentials:'omit', headers});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const ct = r.headers.get('content-type')||'';
+      const body = ct.includes('application/json') ? await r.json() : JSON.parse(await r.text());
+      return body;
+    }catch(e1){
+      // 2) isomorphic-git CORS proxy
+      try{
+        const r2 = await fetch('https://cors.isomorphic-git.org/'+url, {mode:'cors', referrerPolicy:'no-referrer', credentials:'omit', headers});
+        if(!r2.ok) throw new Error('HTTP '+r2.status);
+        const ct2 = r2.headers.get('content-type')||'';
+        const body2 = ct2.includes('application/json') ? await r2.json() : JSON.parse(await r2.text());
+        return body2;
+      }catch(e2){
+        // 3) allorigins raw
+        const u3 = 'https://api.allorigins.win/raw?url='+encodeURIComponent(url);
+        const r3 = await fetch(u3, {mode:'cors', referrerPolicy:'no-referrer', credentials:'omit', headers});
+        if(!r3.ok) throw new Error('HTTP '+r3.status);
+        const ct3 = r3.headers.get('content-type')||'';
+        const body3 = ct3.includes('application/json') ? await r3.json() : JSON.parse(await r3.text());
+        return body3;
+      }
     }
   }
 
@@ -315,8 +346,7 @@
     const term = q.value.trim();
     if(term.length<2){ ac.classList.remove('show'); return; }
     try{
-      const res = await xfetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(term)+'&count=5&language=hu&format=json');
-      const geo = await res.json();
+      const geo = await xfetchJSONStrong('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(term)+'&count=5&language=hu&format=json');
       const list = (geo && geo.results) ? geo.results.map(r=>({ name:r.name, admin1:r.admin1||'', country:r.country||r.country_code||'', cc:r.country_code||'', lat:r.latitude, lon:r.longitude, timezone:r.timezone })) : [];
       state.acResults = list;
       ac.innerHTML = list.map((r,i)=>`
@@ -338,8 +368,7 @@
   async function onSearch(){
     const termRaw = q.value.trim(); if(!termRaw) return shake(q);
     try{
-      const res = await xfetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(termRaw)+'&count=1&language=hu&format=json');
-      const geo = await res.json();
+      const geo = await xfetchJSONStrong('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(termRaw)+'&count=1&language=hu&format=json');
       if(!geo || !geo.results || !geo.results.length){ toast('Nem található ilyen település.','warn'); return; }
       const r = geo.results[0];
       state.place = { name:r.name, country:r.country_code||r.country, admin1:r.admin1||'', lat:r.latitude, lon:r.longitude, timezone:r.timezone };
@@ -351,8 +380,7 @@
     navigator.geolocation.getCurrentPosition(async pos=>{
       const lat = pos.coords.latitude, lon = pos.coords.longitude;
       try{
-        const res = await xfetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat}&longitude=${lon}&language=hu&format=json`);
-        const j = await res.json();
+        const j = await xfetchJSONStrong(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat}&longitude=${lon}&language=hu&format=json`);
         const g = (j && j.results && j.results[0]) || {};
         state.place = { name:g.name||'Jelenlegi hely', country:g.country_code||g.country||'', admin1:g.admin1||'', lat, lon, timezone:g.timezone||'auto' };
       }catch{
@@ -362,7 +390,7 @@
     }, ()=> toast('Nem sikerült lekérni a helyzeted.','warn'), { enableHighAccuracy:false, timeout:10000, maximumAge:60000 });
   }
 
-  /* ===== Open-Meteo előrejelzés – robusztus, retry-val ===== */
+  /* ===== Open-Meteo előrejelzés – robusztus, proxy-lánccal + fallback ===== */
   async function fetchAll(){
     if(!state.place){ toast('Nincs hely kiválasztva.','warn'); return; }
     skeleton(true);
@@ -423,12 +451,8 @@
   }
 
   async function fetchOpenMeteo(params){
-    const url = new URL('https://api.open-meteo.com/v1/forecast');
-    url.search = new URLSearchParams(params).toString();
-    const res = await xfetch(url);
-    const data = await res.json();
-    if(!data) throw new Error('Üres válasz az Open-Meteo-tól');
-    return data;
+    const url = 'https://api.open-meteo.com/v1/forecast?' + new URLSearchParams(params).toString();
+    return await xfetchJSONStrong(url);
   }
 
   function renderAll(){
@@ -560,6 +584,32 @@
   }
   function persist(){ localStorage.setItem('weather:last', JSON.stringify({ units:state.units, place:state.place })); }
 
+  /* ===== Ikon választás ===== */
+  function pickIcon(wmo, isDay){
+    if(wmo==null) return 'i-cloud';
+    if(wmo===0) return isDay?'i-clear-day':'i-clear-night';
+    if(wmo===1||wmo===2) return 'i-partly';
+    if(wmo===3) return 'i-cloud';
+    if(wmo===45||wmo===48) return 'i-mist';
+    if(wmo===51||wmo===53||wmo===55||wmo===56||wmo===57) return 'i-shower';
+    if(wmo===61||wmo===63||wmo===65||wmo===66||wmo===67||wmo===80||wmo===81||wmo===82) return 'i-rain';
+    if(wmo===71||wmo===73||wmo===75||wmo===77||wmo===85||wmo===86) return 'i-snow';
+    if(wmo===95||wmo===96||wmo===99) return 'i-thunder';
+    return 'i-cloud';
+  }
+  function iconClass(wmo,isDay){
+    if(wmo==null) return 'wc-cloud';
+    if(wmo===0) return isDay?'wc-sun':'wc-night';
+    if(wmo===1||wmo===2) return 'wc-partly';
+    if(wmo===3) return 'wc-cloud';
+    if(wmo===45||wmo===48) return 'wc-mist';
+    if(wmo===51||wmo===53||wmo===55||wmo===56||wmo===57) return 'wc-shower';
+    if(wmo===61||wmo===63||wmo===65||wmo===66||wmo===67||wmo===80||wmo===81||wmo===82) return 'wc-rain';
+    if(wmo===71||wmo===73||wmo===75||wmo===77||wmo===85||wmo===86) return 'wc-snow';
+    if(wmo===95||wmo===96||wmo===99) return 'wc-thunder';
+    return 'wc-cloud';
+  }
+
   /* ======== MAP + RADAR (CANVAS) – rács nélkül ======== */
   const mapEl = $('#map'), baseCanvas = $('#baseCanvas'), radarCanvas = $('#radarCanvas'), dotsEl = $('#dots'), timeLabel = $('#timeLabel');
   const bctx = baseCanvas.getContext('2d'), rctx = radarCanvas.getContext('2d');
@@ -575,7 +625,7 @@
     [baseCanvas, radarCanvas].forEach(c=>{
       c.width = Math.round(w*dpr); c.height = Math.round(h*dpr);
       c.style.width = w+'px'; c.style.height = h+'px';
-      const ctx = (c===baseCanvas?bctx:rctx); ctx.setTransform(dpr,0,0,dpr,0,0); // DPI-correct
+      const ctx = (c===baseCanvas?bctx:rctx); ctx.setTransform(dpr,0,0,dpr,0,0);
       ctx.imageSmoothingEnabled = true; ctx.clearRect(0,0,w,h);
     });
   }
@@ -687,8 +737,13 @@
   resizeCanvases(); drawBase(); loadFrames();
 
   /* ===== kis utilok ===== */
-  function formatTimeUnix(sec, tz){ return new Date(sec*1000).toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit', timeZone: tz}); }
-  function niceDateUnix(sec, tz){ return new Date(sec*1000).toLocaleDateString('hu-HU',{month:'short',day:'2-digit',weekday:'short', timeZone: tz}); }
+  function formatTime(s){ const d=new Date(s); return pad(d.getHours())+':'+pad(d.getMinutes()); }
+  function niceDate(s){ const d=new Date(s); return d.toLocaleDateString('hu-HU',{month:'short',day:'2-digit',weekday:'short'}); }
+  function pad(n){ return n<10?'0'+n:n; }
+  function nearestIndex(arr, iso){ const now=+new Date(iso); let i=-1; for(let k=0;k<arr.length;k++){ if(+new Date(arr[k])>=now){ i=k; break; } } return i<0?0:i; }
+  function guessIsDay(iso, sr, ss){ const t=+new Date(iso), a=+new Date(sr), b=+new Date(ss); return t>=a && t<b; }
+  function svgUse(id,size,cls){ if(size===void 0) size=48; if(!cls) cls=''; return '<svg class="'+cls+'" width="'+size+'" height="'+size+'" viewBox="0 0 24 24" aria-hidden="true"><use href="#'+id+'"/></svg>'; }
+  function safeRound(x){ const n=Number(x); return isFinite(n)?Math.round(n):'—'; }
   function persist(){ localStorage.setItem('weather:last', JSON.stringify({ units:state.units, place:state.place })); }
 })(); // IIFE vége
 </script>
