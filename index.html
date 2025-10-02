@@ -220,7 +220,7 @@
   const $ = s => document.querySelector(s);
   const $$ = s => Array.from(document.querySelectorAll(s));
 
-  /* ===== CORS/ORB-safe fetch ===== */
+  /* ===== CORS/ORB-safe fetch – egyszerű, bevált ===== */
   async function xfetch(url, opts){
     opts = opts || {};
     try{
@@ -289,9 +289,22 @@
       const last = JSON.parse(saved);
       if(last.units) setUnits(last.units, true);
       if(last.place){ state.place = last.place; fetchAll(); mapCenter(last.place.lat,last.place.lon,7); }
-    }catch(_){}
+      else { useGeolocation(); setTimeout(fallbackIfNoPlace, 2500); }
+    }catch(_){
+      useGeolocation(); setTimeout(fallbackIfNoPlace, 2500);
+    }
   }else{
-    useGeolocation();
+    useGeolocation(); setTimeout(fallbackIfNoPlace, 2500);
+  }
+
+  function fallbackIfNoPlace(){
+    if(!state.place){
+      state.place = { name:'Budapest', country:'HU', admin1:'Budapest',
+        lat:47.4979, lon:19.0402, timezone:'Europe/Budapest' };
+      persist();
+      fetchAll();
+      mapCenter(state.place.lat, state.place.lon, 8);
+    }
   }
 
   function debounce(fn,ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
@@ -376,11 +389,11 @@
       skeleton(false);
       toast('Frissítve.','ok',1200);
     }catch(err){
-      console.error(err);
+      console.error('Open-Meteo hívás hiba:', err);
       skeleton(false);
       $('#hourly').innerHTML = '<div class="muted small" style="padding:8px">Nincs órás adat.</div>';
       $('#daily').innerHTML  = '<div class="muted small" style="padding:8px">Nincs napi adat.</div>';
-      toast('Nem sikerült lekérni az előrejelzést.','err');
+      toast('Nem sikerült lekérni az előrejelzést (Open-Meteo).','err');
     }
   }
 
@@ -536,11 +549,14 @@
   const imgCache = new Map();
   function loadImg(url){
     return new Promise((res,rej)=>{
-      const key=url; if(imgCache.has(key)){ const v=imgCache.get(key); v.complete?res(v):v.addEventListener('load',()=>res(v),{once:true}); return; }
+      if(imgCache.has(url)){
+        const im=imgCache.get(url);
+        if(im.complete) return res(im);
+        return im.addEventListener('load',()=>res(im),{once:true});
+      }
       const im = new Image(); im.crossOrigin='anonymous'; im.referrerPolicy='no-referrer';
-      im.onload=()=>{ imgCache.set(key, im); res(im); };
-      im.onerror=rej; im.src=url;
-      imgCache.set(key, im);
+      im.onload=()=>{ imgCache.set(url, im); res(im); };
+      im.onerror=rej; im.src=url; imgCache.set(url, im);
     });
   }
 
@@ -567,8 +583,7 @@
     eachVisibleTiles(({z,x,y,dx,dy})=>{
       const url = osmURL(z,x,y);
       loadImg(url).then(im=>{
-        // 1 px átfedés mindkét irányban – a rács eltűnik
-        bctx.drawImage(im, 0,0,TILE,TILE, dx-0.5, dy-0.5, TILE+1, TILE+1);
+        bctx.drawImage(im, 0,0,TILE,TILE, dx-0.5, dy-0.5, TILE+1, TILE+1); // 1px átfedés
       }).catch(()=>{ /* ignore */ });
     });
   }
@@ -603,7 +618,7 @@
     eachVisibleTiles(({z,x,y,dx,dy})=>{
       const url = radarURL(fr.time, z, x, y);
       loadImg(url).then(im=>{
-        rctx.drawImage(im, 0,0,TILE,TILE, dx-0.5, dy-0.5, TILE+1, TILE+1);
+        rctx.drawImage(im, 0,0,TILE,TILE, dx-0.5, dy-0.5, TILE+1, TILE+1); // 1px átfedés
       }).catch(()=>{ /* ignore */ });
     });
     const dt = new Date(fr.time*1000);
@@ -637,9 +652,10 @@
   resizeCanvases(); drawBase(); loadFrames();
 
   /* ===== kis utilok ===== */
+  function svgUse(id,size,cls){ if(size===void 0) size=48; if(!cls) cls=''; return '<svg class="'+cls+'" width="'+size+'" height="'+size+'" viewBox="0 0 24 24" aria-hidden="true"><use href="#'+id+'"/></svg>'; }
   function formatTimeUnix(sec, tz){ return new Date(sec*1000).toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit', timeZone: tz}); }
   function niceDateUnix(sec, tz){ return new Date(sec*1000).toLocaleDateString('hu-HU',{month:'short',day:'2-digit',weekday:'short', timeZone: tz}); }
-
+  function persist(){ localStorage.setItem('weather:last', JSON.stringify({ units:state.units, place:state.place })); }
 })(); // IIFE vége
 </script>
 </body>
