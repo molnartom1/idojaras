@@ -78,6 +78,8 @@
   .skeleton{ background:linear-gradient(90deg,#ffffff10,#ffffff22,#ffffff10); background-size:200% 100%; animation:shimmer 1.4s infinite; border-radius:10px; height:1em }
   @keyframes shimmer{ 0%{background-position:200% 0} 100%{background-position:-200% 0} }
   .warn{ color:var(--warn) } .err{ color:var(--danger) } .ok{ color:var(--ok) }
+
+  /* Ikonok fix színe */
   #currentIcon svg, .tile svg, .dayrow svg { color: var(--text); }
 
   /* Radar */
@@ -168,6 +170,7 @@
       <div class="daygrid" id="daily"><div class="muted small" style="padding:8px">Betöltés…</div></div>
     </article>
 
+    <!-- RADAR -->
     <article class="card map-card" style="grid-column:1/-1">
       <div class="map-toolbar">
         <h3 style="margin:0">Esőradar (RainViewer + OSM)</h3>
@@ -198,6 +201,7 @@
   </footer>
 </div>
 
+<!-- Ikon sprite (WMO) -->
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
   <symbol id="i-clear-day" viewBox="0 0 24 24"><path fill="currentColor" d="M12 18a6 6 0 1 0 0-12a6 6 0 0 0 0 12m0-16h1v3h-1zM12 19h1v3h-1zM1 12h3v1H1zM20 12h3v1h-3zM4.6 4.6l.7-.7l2.1 2.1l-.7.7zM16.6 16.6l.7-.7l2.1 2.1l-.7.7zM16.6 6.7l2.1-2.1l.7.7l-2.1 2.1zM4.6 18.4l2.1-2.1l.7.7l-2.1 2.1z"/></symbol>
   <symbol id="i-clear-night" viewBox="0 0 24 24"><path fill="currentColor" d="M11.5 22q-3.8 0-6.4-2.6T2.5 13Q2.9 8 7 6q.2-.1.4.1t0 .4q-.4 1-.4 2.1q0 3.2 2.3 5.5T15 16.5q1.1 0 2.1-.4q.3-.1.5.1q.2.2.1.4q-1.1 4.1-5.1 5.4q-.6.1-1.1.1Z"/></symbol>
@@ -216,6 +220,22 @@
 (function(){
   var $ = function(s){ return document.querySelector(s); };
   var $$ = function(s){ return Array.prototype.slice.call(document.querySelectorAll(s)); };
+
+  /* ===== ORB-safe fetch (CORS + proxy fallback) ===== */
+  async function xfetch(url, opts){
+    opts = opts || {};
+    try{
+      var res = await fetch(url, Object.assign({mode:'cors', referrerPolicy:'no-referrer'}, opts));
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return res;
+    }catch(e){
+      // Fallback proxy (AllOrigins) – nyers tartalom
+      var proxy = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+      var res2 = await fetch(proxy, {mode:'cors', referrerPolicy:'no-referrer'});
+      if(!res2.ok) throw new Error('Proxy HTTP '+res2.status);
+      return res2;
+    }
+  }
 
   var state = {
     units:'metric', theme:'auto',
@@ -253,7 +273,7 @@
     persist();
   }
 
-  /* ====== Search + AC ====== */
+  /* ====== Search + Autocomplete ====== */
   var q = $('#q'), ac = $('#ac');
   $('#searchBtn').onclick = onSearch;
   q.addEventListener('keydown', function(e){
@@ -283,17 +303,19 @@
   function debounce(fn,ms){ var t; return function(){ var a=arguments; clearTimeout(t); t=setTimeout(function(){ fn.apply(null,a); }, ms); }; }
   function flag(cc){ if(!cc) return '🌍'; var u=String(cc).toUpperCase(); return String.fromCodePoint(0x1F1E6+u.charCodeAt(0)-65, 0x1F1E6+u.charCodeAt(1)-65); }
 
-  function onType(){
+  async function onType(){
     var term = normalize(q.value.trim());
     if(term.length<2){ hideAC(); return; }
-    var url = 'https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(term)+'&count=5&language=hu&format=json';
-    fetch(url).then(function(r){ return r.json(); }).then(function(geo){
+    try{
+      var url = 'https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(term)+'&count=5&language=hu&format=json';
+      var res = await xfetch(url);
+      var geo = await res.json();
       var list = (geo && geo.results) ? geo.results.map(function(r){
         return { name:r.name, admin1:r.admin1||'', country:r.country||r.country_code||'', cc:r.country_code||'', lat:r.latitude, lon:r.longitude, timezone:r.timezone };
       }) : [];
       state.acResults = list;
       renderAC(list);
-    }).catch(function(){ state.acResults=[]; hideAC(); });
+    }catch(_){ state.acResults=[]; hideAC(); }
   }
   function renderAC(list){
     if(!list.length){ hideAC(); return; }
@@ -313,35 +335,38 @@
     q.value = r.name + (r.admin1?(', '+r.admin1):'') + (r.country?(', '+r.country):'');
     hideAC(); persist(); fetchAll(); mapCenter(r.lat, r.lon, 8);
   }
-  function onSearch(){
+
+  async function onSearch(){
     var termRaw = q.value.trim(); if(!termRaw){ return shake(q); }
-    var url = 'https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(termRaw)+'&count=1&language=hu&format=json';
-    fetch(url).then(function(r){ return r.json(); }).then(function(geo){
+    try{
+      var url = 'https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(termRaw)+'&count=1&language=hu&format=json';
+      var res = await xfetch(url);
+      var geo = await res.json();
       if(!geo || !geo.results || !geo.results.length){ toast('Nem található ilyen település.','warn'); return; }
       var r = geo.results[0];
       state.place = { name:r.name, country:r.country_code||r.country, admin1:r.admin1||'', lat:r.latitude, lon:r.longitude, timezone:r.timezone };
       persist(); fetchAll(); mapCenter(state.place.lat, state.place.lon, 8);
-    }).catch(function(){ toast('Keresés közben hiba történt.','err'); });
+    }catch(_){ toast('Keresés közben hiba történt.','err'); }
   }
 
-  function useGeolocation(){
+  async function useGeolocation(){
     if(!navigator.geolocation){ toast('A böngésző nem támogatja a helymeghatározást.','warn'); return; }
-    navigator.geolocation.getCurrentPosition(function(pos){
+    navigator.geolocation.getCurrentPosition(async function(pos){
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
-      fetch('https://geocoding-api.open-meteo.com/v1/reverse?latitude='+lat+'&longitude='+lon+'&language=hu&format=json')
-        .then(function(r){ return r.json(); }).then(function(j){
-          var g = (j && j.results && j.results[0]) || {};
-          state.place = { name:g.name||'Jelenlegi hely', country:g.country_code||g.country||'', admin1:g.admin1||'', lat:lat, lon:lon, timezone:g.timezone||'auto' };
-          persist(); fetchAll(); mapCenter(lat, lon, 8);
-        }).catch(function(){
-          state.place = { name:'Jelenlegi hely', country:'', admin1:'', lat:lat, lon:lon, timezone:'auto' };
-          persist(); fetchAll(); mapCenter(lat, lon, 8);
-        });
+      try{
+        var res = await xfetch('https://geocoding-api.open-meteo.com/v1/reverse?latitude='+lat+'&longitude='+lon+'&language=hu&format=json');
+        var j = await res.json();
+        var g = (j && j.results && j.results[0]) || {};
+        state.place = { name:g.name||'Jelenlegi hely', country:g.country_code||g.country||'', admin1:g.admin1||'', lat:lat, lon:lon, timezone:g.timezone||'auto' };
+      }catch(_){
+        state.place = { name:'Jelenlegi hely', country:'', admin1:'', lat:lat, lon:lon, timezone:'auto' };
+      }
+      persist(); fetchAll(); mapCenter(lat, lon, 8);
     }, function(){ toast('Nem sikerült lekérni a helyzeted.','warn'); }, { enableHighAccuracy:false, timeout:10000, maximumAge:60000 });
   }
 
   /* ====== Open-Meteo ====== */
-  function fetchAll(){
+  async function fetchAll(){
     if(!state.place){ toast('Nincs hely kiválasztva.','warn'); return; }
     skeleton(true);
     var lat = state.place.lat, lon = state.place.lon, timezone = state.place.timezone || 'auto';
@@ -359,7 +384,9 @@
       timezone: timezone, temperature_unit: tempUnit, wind_speed_unit: windUnit, precipitation_unit: precipUnit, forecast_days: 7
     }).toString();
 
-    fetch(url).then(function(res){ return res.json(); }).then(function(data){
+    try{
+      var res = await xfetch(url);
+      var data = await res.json();
       if(!data || !data.hourly || !data.hourly.time || !data.daily || !data.daily.time){
         throw new Error('missing arrays');
       }
@@ -367,13 +394,13 @@
       renderAll();
       skeleton(false);
       toast('Frissítve.','ok',1200);
-    }).catch(function(err){
+    }catch(err){
       console.error(err);
       skeleton(false);
       $('#hourly').innerHTML = '<div class="muted small" style="padding:8px">Nincs órás adat.</div>';
       $('#daily').innerHTML = '<div class="muted small" style="padding:8px">Nincs napi adat.</div>';
       toast('Nem sikerült lekérni az előrejelzést.','err');
-    });
+    }
   }
 
   function renderAll(){
@@ -517,9 +544,19 @@
     if([95,96,99].indexOf(code)>-1) return 'i-thunder';
     return 'i-wind';
   }
+  function describeWMO(code){
+    var m = {
+      0:'Derült',1:'Többnyire derült',2:'Változó felhőzet',3:'Borult',
+      45:'Köd',48:'Zúzmarás köd',51:'Gyenge szitálás',53:'Mérsékelt szitálás',55:'Erős szitálás',
+      56:'Gyenge ónos szitálás',57:'Erős ónos szitálás',61:'Gyenge eső',63:'Eső',65:'Erős eső',
+      66:'Gyenge ónos eső',67:'Erős ónos eső',71:'Gyenge havazás',73:'Havazás',75:'Erős havazás',
+      77:'Hódara',80:'Záporok',81:'Erős zápor',82:'Felhőszakadás',85:'Hózápor',86:'Erős hózápor',
+      95:'Zivatar',96:'Zivatar jéggel',99:'Erős zivatar jéggel'
+    }; return (m[code]||'—');
+  }
   function persist(){ localStorage.setItem('weather:last', JSON.stringify({ units:state.units, place:state.place })); }
 
-  /* ====== Map & Radar (ugyanaz a stabil verzió, mint korábban) ====== */
+  /* ====== Map & Radar ====== */
   var map = $('#map'), baseLayer = $('#baseLayer'), radarLayer = $('#radarLayer'), dotsEl = $('#dots'), timeLabel = $('#timeLabel');
   function osm(z,x,y){ return 'https://tile.openstreetmap.org/'+z+'/'+x+'/'+y+'.png'; }
   function lon2x(lon,z){ return ((lon+180)/360)*Math.pow(2,z); }
@@ -539,9 +576,10 @@
           var x=startX+i, y=startY+j, max=Math.pow(2,z);
           var wrappedX=((x%max)+max)%max; if(y<0||y>=max) continue;
           var img=new Image(256,256); img.className='tile';
+          img.crossOrigin='anonymous'; img.referrerPolicy='no-referrer';
           img.style.left = Math.round(offsetX + i*tileSize) + 'px';
           img.style.top  = Math.round(offsetY + j*tileSize) + 'px';
-          img.loading='lazy'; img.decoding='async'; img.referrerPolicy='no-referrer';
+          img.loading='lazy'; img.decoding='async';
           img.src=urlFn(z, wrappedX, y); container.appendChild(img);
         }
       }
@@ -565,14 +603,15 @@
   map.addEventListener('wheel', function(e){ e.preventDefault(); var d=Math.sign(e.deltaY); state.map.z=Math.min(12,Math.max(2,state.map.z-d)); renderMap(); }, {passive:false});
 
   var radar = state.radar;
-  function loadFrames(){
-    fetch('https://api.rainviewer.com/public/weather-maps.json').then(function(r){ return r.json(); }).then(function(j){
+  async function loadFrames(){
+    try{
+      var j = await xfetch('https://api.rainviewer.com/public/weather-maps.json').then(function(r){ return r.json(); });
       var past = j && j.radar && j.radar.past ? j.radar.past : [];
       var nowc = j && j.radar && j.radar.nowcast ? j.radar.nowcast : [];
       radar.frames = past.concat(nowc);
       if(!radar.frames.length) throw new Error('no-frames');
       radar.idx = radar.frames.length-1; buildTimeline(); drawRadar(); play();
-    }).catch(function(){ toast('Nem sikerült betölteni a radart.','warn'); });
+    }catch(_){ toast('Nem sikerült betölteni a radart.','warn'); }
   }
   function radarTileURL(ts,z,x,y){ return 'https://tilecache.rainviewer.com/v2/radar/'+ts+'/256/'+z+'/'+x+'/'+y+'/2/1_1.png'; }
   function drawRadar(){
@@ -589,9 +628,10 @@
         var x=startX+i, y=startY+j, max=Math.pow(2,z);
         var wrappedX=((x%max)+max)%max; if(y<0||y>=max) continue;
         var img=new Image(256,256); img.className='tile';
+        img.crossOrigin='anonymous'; img.referrerPolicy='no-referrer';
         img.style.left = Math.round(offsetX + i*tileSize) + 'px';
         img.style.top  = Math.round(offsetY + j*tileSize) + 'px';
-        img.loading='lazy'; img.decoding='async'; img.referrerPolicy='no-referrer';
+        img.loading='lazy'; img.decoding='async';
         img.src = radarTileURL(fr.time, z, wrappedX, y); radarLayer.appendChild(img);
       }
     }
@@ -639,6 +679,18 @@
     state.deferredPrompt.userChoice.then(function(choice){ if(choice && choice.outcome==='accepted') $('#installBtn').classList.add('hidden'); state.deferredPrompt=null; });
   };
 
+  /* ====== END IIFE ====== */
+  // Segédfüggvények a végére
+  function describeWMO(code){
+    var m = {
+      0:'Derült',1:'Többnyire derült',2:'Változó felhőzet',3:'Borult',
+      45:'Köd',48:'Zúzmarás köd',51:'Gyenge szitálás',53:'Mérsékelt szitálás',55:'Erős szitálás',
+      56:'Gyenge ónos szitálás',57:'Erős ónos szitálás',61:'Gyenge eső',63:'Eső',65:'Erős eső',
+      66:'Gyenge ónos eső',67:'Erős ónos eső',71:'Gyenge havazás',73:'Havazás',75:'Erős havazás',
+      77:'Hódara',80:'Záporok',81:'Erős zápor',82:'Felhőszakadás',85:'Hózápor',86:'Erős hózápor',
+      95:'Zivatar',96:'Zivatar jéggel',99:'Erős zivatar jéggel'
+    }; return (m[code]||'—');
+  }
 })();
 </script>
 </body>
