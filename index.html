@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Időjárás – Mobilbarát előrejelzés + Esőradar</title>
+<title>Időjárás – Egyfájlos PWA • Offline • Animált ikonok • Radar</title>
 <meta name="theme-color" content="#0f172a" />
 <meta name="color-scheme" content="light dark" />
 <style>
@@ -24,7 +24,6 @@
   *{box-sizing:border-box}
   html,body{height:100%}
   html, body { overflow-x: hidden; }
-
   body{
     margin:0; font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",Arial,"Noto Sans";
     background: radial-gradient(1200px 800px at 10% -10%, #22d3ee22, transparent 70%), radial-gradient(1000px 700px at 110% -10%, #a78bfa22, transparent 70%), var(--bg);
@@ -47,6 +46,7 @@
   .btn{ border:0; padding:10px 14px; border-radius:12px; font-weight:600; cursor:pointer; transition:.2s transform ease,.2s background ease,.2s opacity ease; background:var(--accent); color:#001018; box-shadow:var(--shadow) }
   .btn:hover{ transform:translateY(-1px) }
   .btn.secondary{ background:#334155; color:#e5e7eb } @media (prefers-color-scheme: light){ .btn.secondary{ background:#e2e8f0; color:#0f172a } }
+  .install{ background:#10b981; color:#001018; display:none } .install.show{ display:inline-block }
 
   /* Autocomplete */
   .ac{ position:absolute; left:8px; right:8px; top:100%; margin-top:6px; background:var(--card); border:1px solid #ffffff22; border-radius:12px; box-shadow:var(--shadow); overflow:hidden; z-index:50; display:none; }
@@ -55,6 +55,9 @@
   .ac-item:hover{ background:#ffffff10; }
   .ac-name{ font-weight:700 }
   .ac-sub{ color:var(--muted); font-size:.92rem }
+
+  .offline-badge{ display:none; align-items:center; gap:8px; padding:8px 10px; border-radius:999px; background:#f59e0b; color:#001018; font-weight:700 }
+  .offline-badge.show{ display:inline-flex }
 
   .grid{ display:grid; gap:14px; grid-template-columns:1fr }
   @media (min-width:820px){ .grid{ grid-template-columns:1.1fr .9fr } }
@@ -66,7 +69,6 @@
   .meta{ display:flex; gap:10px; flex-wrap:wrap; margin-top:6px }
   .chip{ background:#ffffff10; padding:8px 10px; border-radius:999px; font-size:.92rem; display:flex; gap:8px; align-items:center }
 
-  /* órás sáv */
   .scroll{ display:flex; gap:10px; overflow-x:auto; overflow-y:hidden; padding-bottom:6px; scroll-snap-type:x mandatory; width:100%; max-width:100%; -webkit-overflow-scrolling:touch }
   .tile{ flex:0 0 auto; min-width:clamp(86px, 28vw, 120px); scroll-snap-align:start; background:#ffffff10; border:1px solid #ffffff14; border-radius:14px; padding:10px; display:grid; gap:6px; place-items:center }
 
@@ -78,13 +80,27 @@
   .seg.active{ background:var(--accent); color:#001018; font-weight:700 }
   .badge{ font-size:.8rem; padding:.2rem .5rem; border-radius:999px; background:#ffffff10; border:1px solid #ffffff22 }
 
-  /* SZÍNES ikonok */
+  /* ANIMÁCIÓK – ikonokhoz */
+  @keyframes spin-slow { from{transform:rotate(0)} to{transform:rotate(360deg)} }
+  @keyframes float-x   { 0%{transform:translateX(0)} 50%{transform:translateX(6px)} 100%{transform:translateX(0)} }
+  @keyframes fall      { 0%{transform:translateY(-6px); opacity:0} 30%{opacity:1} 100%{transform:translateY(8px); opacity:0} }
+  @keyframes blink     { 0%,80%{opacity:0.2} 85%{opacity:1} 100%{opacity:0.2} }
+  @keyframes drift     { 0%{transform:translateX(0)} 100%{transform:translateX(12px)} }
+
+  .ico-sun .rays{ transform-origin:50% 50%; animation:spin-slow 16s linear infinite }
+  .ico-cloud .cloud{ animation:float-x 6s ease-in-out infinite }
+  .ico-rain .drop{ animation:fall 1.2s ease-in infinite; }
+  .ico-snow .flake{ animation:fall 1.8s linear infinite }
+  .ico-thunder .bolt{ animation:blink 1.8s ease-in-out infinite }
+  .ico-mist .band{ animation:drift 8s linear infinite; animation-direction:alternate }
+
+  /* színezés */
   .wc-sun{ color:#fbbf24 } .wc-night{ color:#93c5fd } .wc-partly{ color:#fde68a }
   .wc-cloud{ color:#9ca3af } .wc-mist{ color:#94a3b8 } .wc-rain{ color:#60a5fa }
   .wc-shower{ color:#38bdf8 } .wc-snow{ color:#e5e7eb } .wc-thunder{ color:#f59e0b } .wc-wind{ color:#a78bfa }
   @media (prefers-color-scheme: light){ .wc-cloud{ color:#64748b } .wc-mist{ color:#64748b } .wc-snow{ color:#2563eb } }
 
-  /* RADAR – CANVAS alapú, rács nélkül */
+  /* RADAR – CANVAS */
   .map-card{ padding:0; overflow:hidden }
   .map-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 12px 0 12px }
   .map{ position:relative; height:420px; background:#0b1220; touch-action:pinch-zoom pan-x pan-y; user-select:none; overflow:hidden; border-radius:0 0 var(--radius) var(--radius) }
@@ -104,10 +120,11 @@
       <div class="logo" aria-hidden="true">⛅</div>
       <div>
         <h1>Időjárás előrejelzés</h1>
-        <div class="muted small">Mobilbarát ikonokkal, esőradarral</div>
+        <div class="muted small">Egyfájlos PWA • Offline mód • Animált ikonok • Radar</div>
       </div>
     </div>
-    <div class="row" style="display:flex; gap:8px; flex-wrap:wrap">
+    <div class="row" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+      <span id="offlineBadge" class="offline-badge" title="Cache-ből megjelenített adatok">⚠ Offline mód</span>
       <div class="theme-toggle" role="tablist" aria-label="Téma">
         <button class="seg" id="themeAuto" role="tab">Auto</button>
         <button class="seg" id="themeLight" role="tab">Világos</button>
@@ -117,6 +134,7 @@
         <button class="seg active" id="unitC" role="tab" aria-selected="true">°C</button>
         <button class="seg" id="unitF" role="tab" aria-selected="false">°F</button>
       </div>
+      <button id="installBtn" class="btn install" type="button" title="Telepítés">Telepítés</button>
     </div>
   </header>
 
@@ -201,26 +219,122 @@
   </footer>
 </div>
 
-<!-- Ikon sprite -->
-<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
-  <symbol id="i-clear-day" viewBox="0 0 24 24"><path fill="currentColor" d="M12 18a6 6 0 1 0 0-12a6 6 0 0 0 0 12m0-16h1v3h-1zM12 19h1v3h-1zM1 12h3v1H1zM20 12h3v1h-3zM4.6 4.6l.7-.7l2.1 2.1l-.7.7zM16.6 16.6l.7-.7l2.1 2.1l-.7.7zM16.6 6.7l2.1-2.1l.7.7l-2.1 2.1zM4.6 18.4l2.1-2.1l.7.7l-2.1 2.1z"/></symbol>
-  <symbol id="i-clear-night" viewBox="0 0 24 24"><path fill="currentColor" d="M11.5 22q-3.8 0-6.4-2.6T2.5 13Q2.9 8 7 6q.2-.1.4.1t0 .4q-.4 1-.4 2.1q0 3.2 2.3 5.5T15 16.5q1.1 0 2.1-.4q.3-.1.5.1q.2.2.1.4q-1.1 4.1-5.1 5.4q-.6.1-1.1.1Z"/></symbol>
-  <symbol id="i-cloud" viewBox="0 0 24 24"><path fill="currentColor" d="M7 19q-2.1 0-3.55-1.45T2 14q0-1.95 1.275-3.4T6.5 9.05Q7.55 6.3 9.913 4.65T15 3q3.35 0 5.675 2.162T23 10q0 2.925-2.037 4.963T16 17H7Z"/></symbol>
-  <symbol id="i-partly" viewBox="0 0 24 24"><path fill="currentColor" d="M8 18q-1.65 0-2.825-1.175T4 14q0-1.65 1.175-2.825T8 10q.95 0 1.8.4t1.45 1.1q.8-1 2-1.5T17 9q1.85 0 3.175 1.325T21.5 13q0 1.45-.9 2.575T18.4 17H8Z"/><path d="M6 5l1 2l2 1l-2 1l-1 2l-1-2L3 8l2-1z" fill="currentColor"/></symbol>
-  <symbol id="i-rain" viewBox="0 0 24 24"><path fill="currentColor" d="M6 14q-1.65 0-2.825-1.175T2 10q0-1.65 1.175-2.825T6 6q.95 0 1.8.4t1.45 1.1q.8-1 2-1.5T15 5q2.5 0 4.25 1.75T21 11q0 1.25-.487 2.35T18.9 15H6Zm2 7l2-3m4 3l2-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
-  <symbol id="i-shower" viewBox="0 0 24 24"><path fill="currentColor" d="M6 14q-1.65 0-2.825-1.175T2 10q0-1.65 1.175-2.825T6 6q.95 0 1.8.4t1.45 1.1q.8-1 2-1.5T15 5q2.5 0 4.25 1.75T21 11q0 1.25-.487 2.35T18.9 15H6Z"/><path d="M7 18l.8-1.2M10 20l.8-1.2M13 18l.8-1.2M16 20l.8-1.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
-  <symbol id="i-thunder" viewBox="0 0 24 24"><path fill="currentColor" d="M6 14q-1.65 0-2.825-1.175T2 10q0-1.65 1.175-2.825T6 6q.95 0 1.8.4t1.45 1.1q.8-1 2-1.5T15 5q2.5 0 4.25 1.75T21 11q0 1.25-.487 2.35T18.9 15H6Z"/><path d="M12 15l4-6h-3l1-4l-4 6h3z" fill="currentColor"/></symbol>
-  <symbol id="i-snow" viewBox="0 0 24 24"><path fill="currentColor" d="M6 14q-1.65 0-2.825-1.175T2 10q0-1.65 1.175-2.825T6 6q.95 0 1.8.4t1.45 1.1q.8-1 2-1.5T15 5q2.5 0 4.25 1.75T21 11q0 1.25-.487 2.35T18.9 15H6Z"/><path d="M12 18v-6m0 0l2.5 1.5M12 12l-2.5 1.5M12 18l2.5 1.5M12 18l-2.5 1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
-  <symbol id="i-mist" viewBox="0 0 24 24"><path fill="currentColor" d="M3 9h18v1H3zm2 3h14v1H5zm-1 3h16v1H4z"/></symbol>
-  <symbol id="i-wind" viewBox="0 0 24 24"><path fill="currentColor" d="M3 10h10a2 2 0 1 0-2-2h-1a3 3 0 1 1 3 3H3zm0 4h15a2 2 0 1 1-2 2h-1a3 3 0 1 0 3-3H3z"/></symbol>
-</svg>
-
 <script>
 (function(){
   const $ = s => document.querySelector(s);
   const $$ = s => Array.from(document.querySelectorAll(s));
+  const OFFLINE_BADGE = $('#offlineBadge');
 
-  /* ===== Alap fetch más dolgokra (radar JSON stb.) ===== */
+  /* ========= 0) BEÁGYAZOTT MANIFEST + SW LÉTREHOZÁS ========= */
+  // — ikonok (placeholder data: 1×1 PNG) — bármikor cserélhetőek igazi PNG-re
+  const PNG1x1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/axhXlEAAAAASUVORK5CYII=";
+
+  const manifestObj = {
+    name: "Időjárás – Előrejelzés + Esőradar",
+    short_name: "Időjárás",
+    start_url: "./",
+    scope: "./",
+    display: "standalone",
+    background_color: "#0f172a",
+    theme_color: "#0f172a",
+    lang: "hu",
+    icons: [
+      { src: PNG1x1, sizes: "192x192", type: "image/png", purpose: "any maskable" },
+      { src: PNG1x1, sizes: "512x512", type: "image/png", purpose: "any maskable" }
+    ]
+  };
+  const manifestURL = URL.createObjectURL(new Blob([JSON.stringify(manifestObj)], {type:"application/manifest+json"}));
+  // a manifestet head-hez adjuk
+  const ml = document.createElement('link'); ml.rel='manifest'; ml.href=manifestURL; document.head.appendChild(ml);
+
+  // — service worker kód (network-first API + shell cache + tile SWR)
+  const SW_CODE = `
+    const CACHE_STATIC = 'wx-static-v1.2';
+    const CACHE_RUNTIME = 'wx-runtime-v1.2';
+    const CACHE_API = 'wx-api-v1.2';
+
+    const CORE_ASSETS = [
+      './' // egyfájlos app – maga az oldal
+    ];
+
+    self.addEventListener('install', (e)=>{
+      e.waitUntil(
+        caches.open(CACHE_STATIC).then(c=>c.addAll(CORE_ASSETS)).then(()=>self.skipWaiting())
+      );
+    });
+
+    self.addEventListener('activate', (e)=>{
+      e.waitUntil(
+        caches.keys().then(keys=>Promise.all(
+          keys.filter(k=>![CACHE_STATIC, CACHE_RUNTIME, CACHE_API].includes(k)).map(k=>caches.delete(k))
+        )).then(()=>self.clients.claim())
+      );
+    });
+
+    self.addEventListener('fetch', (e)=>{
+      const req = e.request;
+      const url = new URL(req.url);
+
+      // App shell – cache-first
+      if (url.origin === self.location.origin && (url.pathname==='/' || url.pathname.endsWith('.html') || url.pathname==='')){
+        e.respondWith(caches.match(req).then(hit=> hit || fetch(req)));
+        return;
+      }
+
+      // Csempék (OSM/RainViewer): stale-while-revalidate
+      if (/tile\\.openstreetmap\\.org|tilecache\\.rainviewer\\.com/.test(url.hostname)){
+        e.respondWith((async ()=>{
+          const cache = await caches.open(CACHE_RUNTIME);
+          const cached = await cache.match(req);
+          const fetchPromise = fetch(req, {mode:'no-cors'}).then(res=>{
+            try { cache.put(req, res.clone()); } catch(_){}
+            return res;
+          }).catch(_=> cached);
+          return cached || fetchPromise;
+        })());
+        return;
+      }
+
+      // Open-Meteo – network-first + cache-fallback
+      if (/api\\.open-meteo\\.com\\/v1\\/forecast/.test(req.url)){
+        e.respondWith((async ()=>{
+          const cache = await caches.open(CACHE_API);
+          try{
+            const fresh = await fetch(req);
+            cache.put(req, fresh.clone());
+            return fresh;
+          }catch(_){
+            const cached = await cache.match(req);
+            return cached || Response.error();
+          }
+        })());
+        return;
+      }
+
+      // Alap: network-first
+      e.respondWith((async ()=>{
+        try{ return await fetch(req); }
+        catch(_){ const cached = await caches.match(req); return cached || Response.error(); }
+      })());
+    });
+  `;
+  const swURL = URL.createObjectURL(new Blob([SW_CODE], {type:'text/javascript'}));
+
+  // SW reg + install prompt
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', async ()=>{
+      try{ await navigator.serviceWorker.register(swURL); }
+      catch(e){ console.warn('SW reg hiba', e); }
+    });
+  }
+  let deferredPrompt=null;
+  window.addEventListener('beforeinstallprompt', (e)=>{
+    e.preventDefault(); deferredPrompt = e;
+    const btn = $('#installBtn'); btn.classList.add('show');
+    btn.onclick = async ()=>{ btn.classList.remove('show'); if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; };
+  });
+
+  /* ========= 1) FETCH SEGÉDEK ========= */
   async function xfetch(url, opts){
     opts = opts || {};
     const base = Object.assign({mode:'cors', referrerPolicy:'no-referrer', credentials:'omit'}, opts);
@@ -235,11 +349,8 @@
       return res2;
     }
   }
-
-  /* ===== Kifejezetten JSON letöltés erős proxy-lánccal (Open-Meteo) ===== */
   async function xfetchJSONStrong(url){
     const headers = {'Accept':'application/json'};
-    // 1) közvetlen
     try{
       const r = await fetch(url, {mode:'cors', referrerPolicy:'no-referrer', credentials:'omit', headers});
       if(!r.ok) throw new Error('HTTP '+r.status);
@@ -247,7 +358,6 @@
       const body = ct.includes('application/json') ? await r.json() : JSON.parse(await r.text());
       return body;
     }catch(e1){
-      // 2) isomorphic-git CORS proxy
       try{
         const r2 = await fetch('https://cors.isomorphic-git.org/'+url, {mode:'cors', referrerPolicy:'no-referrer', credentials:'omit', headers});
         if(!r2.ok) throw new Error('HTTP '+r2.status);
@@ -255,7 +365,6 @@
         const body2 = ct2.includes('application/json') ? await r2.json() : JSON.parse(await r2.text());
         return body2;
       }catch(e2){
-        // 3) allorigins raw
         const u3 = 'https://api.allorigins.win/raw?url='+encodeURIComponent(url);
         const r3 = await fetch(u3, {mode:'cors', referrerPolicy:'no-referrer', credentials:'omit', headers});
         if(!r3.ok) throw new Error('HTTP '+r3.status);
@@ -266,15 +375,16 @@
     }
   }
 
+  /* ========= 2) APP ÁLLAPOT ========= */
   const state = {
     units:'metric', theme:'auto',
-    place:null, data:null, tz:'Europe/Budapest',
+    place:null, data:null, tz:'Europe/Budapest', offline:false,
     acResults:[],
     map:{ z:6, lon:19.0408, lat:47.4979, dragging:false, last:null },
     radar:{ frames:[], idx:0, playing:true, timer:null }
   };
 
-  /* ===== Téma ===== */
+  /* ========= 3) TÉMA ========= */
   function applyTheme(){
     const root=document.documentElement;
     root.removeAttribute('data-force');
@@ -292,7 +402,7 @@
     $('#themeDark').onclick  = ()=>{ state.theme='dark';  applyTheme(); };
   })();
 
-  /* ===== Egységek ===== */
+  /* ========= 4) EGYSÉGEK ========= */
   $('#unitC').onclick = ()=> setUnits('metric');
   $('#unitF').onclick = ()=> setUnits('imperial');
   function setUnits(u, silent){
@@ -303,7 +413,7 @@
     persist();
   }
 
-  /* ===== Keresés + geokódoló (Open-Meteo) ===== */
+  /* ========= 5) KERESÉS + GEO ========= */
   const q = $('#q'), ac = $('#ac');
   $('#searchBtn').onclick = onSearch;
   q.addEventListener('keydown', e=>{
@@ -319,28 +429,28 @@
     try{
       const last = JSON.parse(saved);
       if(last.units) setUnits(last.units, true);
-      if(last.place){ state.place = last.place; fetchAll(); mapCenter(last.place.lat,last.place.lon,7); }
-      else { useGeolocation(); setTimeout(fallbackIfNoPlace, 2500); }
-    }catch(_){
-      useGeolocation(); setTimeout(fallbackIfNoPlace, 2500);
-    }
-  }else{
-    useGeolocation(); setTimeout(fallbackIfNoPlace, 2500);
+      if(last.place){ state.place = last.place; mapCenter(last.place.lat,last.place.lon,7); }
+    }catch(_){}
   }
+  // Offline előnézet cache-ből, ha van
+  const cachedData = loadDataCache();
+  if(cachedData && !state.data){
+    state.data = cachedData.payload;
+    state.tz = cachedData.payload.timezone || 'auto';
+    state.offline = true;
+    renderAll();
+    showOffline(true);
+  }
+  // majd friss online lekérés
+  if(state.place){ fetchAll(); } else { useGeolocation(); setTimeout(fallbackIfNoPlace, 2500); }
 
   function fallbackIfNoPlace(){
     if(!state.place){
       state.place = { name:'Budapest', country:'HU', admin1:'Budapest',
         lat:47.4979, lon:19.0402, timezone:'Europe/Budapest' };
-      persist();
-      fetchAll();
-      mapCenter(state.place.lat, state.place.lon, 8);
+      persist(); fetchAll(); mapCenter(state.place.lat, state.place.lon, 8);
     }
   }
-
-  function debounce(fn,ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-  function escapeHTML(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
-  function flag(cc){ if(!cc) return '🌍'; const u=String(cc).toUpperCase(); return String.fromCodePoint(0x1F1E6+u.charCodeAt(0)-65, 0x1F1E6+u.charCodeAt(1)-65); }
 
   async function onType(){
     const term = q.value.trim();
@@ -390,10 +500,10 @@
     }, ()=> toast('Nem sikerült lekérni a helyzeted.','warn'), { enableHighAccuracy:false, timeout:10000, maximumAge:60000 });
   }
 
-  /* ===== Open-Meteo előrejelzés – robusztus, proxy-lánccal + fallback ===== */
+  /* ========= 6) OPEN-METEO + OFFLINE ========= */
   async function fetchAll(){
     if(!state.place){ toast('Nincs hely kiválasztva.','warn'); return; }
-    skeleton(true);
+    skeleton(true); showOffline(false);
     const { lat, lon } = state.place;
     const timezone = state.place.timezone || 'auto';
     const tempUnit = state.units==='metric'?'celsius':'fahrenheit';
@@ -419,7 +529,6 @@
 
     try{
       let data = await fetchOpenMeteo(paramsFull);
-
       const hourlyMissing = !data.hourly || !Array.isArray(data.hourly.time) || !data.hourly.time.length;
       const dailyMissing  = !data.daily  || !Array.isArray(data.daily.time)  || !data.daily.time.length;
 
@@ -432,21 +541,33 @@
           hourly: 'temperature_2m,weather_code,wind_speed_10m,precipitation',
           daily: 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,wind_speed_10m_max'
         };
-        console.warn('[Open-Meteo] Fallback paraméterekre váltok…');
         data = await fetchOpenMeteo(paramsLight);
       }
 
       state.data = data;
       state.tz = data.timezone || timezone;
+      state.offline = false;
+      saveDataCache({ place:state.place, payload:data, ts:Date.now(), units:state.units });
       renderAll();
       skeleton(false);
       toast('Frissítve.','ok',1200);
     }catch(err){
-      console.error('Open-Meteo hívás hiba:', err);
-      skeleton(false);
-      $('#hourly').innerHTML = '<div class="muted small" style="padding:8px">Nincs órás adat.</div>';
-      $('#daily').innerHTML  = '<div class="muted small" style="padding:8px">Nincs napi adat.</div>';
-      toast('Nem sikerült lekérni az előrejelzést (Open-Meteo).','err');
+      console.error('Open-Meteo hiba, cache használat:', err);
+      const cached = loadDataCache();
+      if(cached){
+        state.data = cached.payload;
+        state.tz = cached.payload.timezone || timezone;
+        state.offline = true;
+        renderAll();
+        skeleton(false);
+        showOffline(true);
+        toast('Offline cache-ből megjelenítve.','warn');
+      }else{
+        skeleton(false);
+        $('#hourly').innerHTML = '<div class="muted small" style="padding:8px">Nincs órás adat.</div>';
+        $('#daily').innerHTML  = '<div class="muted small" style="padding:8px">Nincs napi adat.</div>';
+        toast('Nem sikerült lekérni az előrejelzést. Nincs offline mentés.','err');
+      }
     }
   }
 
@@ -455,18 +576,19 @@
     return await xfetchJSONStrong(url);
   }
 
+  /* ========= 7) RENDER + ANIMÁLT IKONOK ========= */
   function renderAll(){
     const place = state.place, data = state.data; if(!place||!data) return;
 
     $('#place').textContent = [place.name, place.admin1, place.country].filter(Boolean).join(', ');
     $('#tz').textContent = (data.timezone || place.timezone || 'helyi idő').replace('_',' ');
-    $('#updated').textContent = 'Most frissítve';
+    $('#updated').textContent = state.offline ? 'Utolsó mentett adatok' : 'Most frissítve';
 
     const c = data.current || {};
     const d0 = data.daily || {};
     const isDay = !!c.is_day;
 
-    $('#currentIcon').innerHTML = svgUse(pickIcon(c.weather_code, isDay), 92, iconClass(c.weather_code, isDay));
+    $('#currentIcon').innerHTML = animatedIcon(c.weather_code, isDay, 92);
     $('#temp').textContent = safeRound(c.temperature_2m) + '°';
     $('#desc').textContent = describeWMO(c.weather_code);
     $('#feels').textContent = safeRound(c.apparent_temperature) + '°';
@@ -486,14 +608,14 @@
       const tiles = [];
       for(let i=start; i<end; i++){
         const ht = H.time[i];
-        tiles.push(tileHour({
-          time: ht,
-          temp: safeRound(H.temperature_2m && H.temperature_2m[i]),
-          pop: (H.precipitation_probability && H.precipitation_probability[i] != null) ? H.precipitation_probability[i] : null,
-          wcode: H.weather_code ? H.weather_code[i] : null,
-          isDay: (d0.sunrise && d0.sunrise[0] && d0.sunset && d0.sunset[0]) ? guessIsDay(ht, d0.sunrise[0], d0.sunset[0]) : true,
-          wind: safeRound(H.wind_speed_10m && H.wind_speed_10m[i])
-        }));
+        const isD = (d0.sunrise && d0.sunrise[0] && d0.sunset && d0.sunset[0]) ? guessIsDay(ht, d0.sunrise[0], d0.sunset[0]) : true;
+        tiles.push('<div class="tile" title="'+new Date(ht).toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit'})+'">'+
+          animatedIcon(H.weather_code?H.weather_code[i]:null, isD, 40)+
+          '<div><strong>'+safeRound(H.temperature_2m && H.temperature_2m[i])+'°</strong></div>'+
+          '<div class="muted small">'+new Date(ht).toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit'})+'</div>'+
+          '<div class="muted small">'+((H.precipitation_probability && H.precipitation_probability[i]!=null)?('Csap.: '+H.precipitation_probability[i]+'%'):'\u00A0')+'</div>'+
+          '<div class="muted small">Szél: '+safeRound(H.wind_speed_10m && H.wind_speed_10m[i])+' '+(state.units==='metric'?'km/h':'mph')+'</div>'+
+        '</div>');
       }
       $('#hourly').innerHTML = tiles.join('') || '<div class="muted small" style="padding:8px">Nincs órás adat.</div>';
       $('#hourlyRange').textContent = (H.time[start]?formatTime(H.time[start]):'—') + ' – ' + (H.time[end-1]?formatTime(H.time[end-1]):'—');
@@ -505,14 +627,16 @@
     if(d0.time && d0.time.length){
       const rows = [];
       for(let j=0;j<d0.time.length;j++){
-        rows.push(rowDay({
-          date: d0.time[j],
-          wcode: d0.weather_code ? d0.weather_code[j] : null,
-          tmin: safeRound(d0.temperature_2m_min && d0.temperature_2m_min[j]),
-          tmax: safeRound(d0.temperature_2m_max && d0.temperature_2m_max[j]),
-          pop: (d0.precipitation_probability_max && d0.precipitation_probability_max[j]!=null) ? d0.precipitation_probability_max[j] : null,
-          wind: safeRound(d0.wind_speed_10m_max && d0.wind_speed_10m_max[j])
-        }));
+        rows.push('<div class="dayrow">'+
+          '<div class="row" style="display:flex; gap:12px">'+
+            animatedIcon(d0.weather_code?d0.weather_code[j]:null, true, 26)+
+            '<div><strong>'+new Date(d0.time[j]).toLocaleDateString('hu-HU',{weekday:'long'})+'</strong>'+
+            '<div class="muted small">'+new Date(d0.time[j]).toLocaleDateString('hu-HU',{month:'long',day:'2-digit'})+'</div></div>'+
+          '</div>'+
+          '<div class="muted small">'+((d0.precipitation_probability_max && d0.precipitation_probability_max[j]!=null)?('Csap.: '+d0.precipitation_probability_max[j]+'%'):'—')+'</div>'+
+          '<div class="row" style="display:flex; align-items:center; gap:6px"><strong>'+safeRound(d0.temperature_2m_max && d0.temperature_2m_max[j])+'°</strong> <span class="muted">/</span> <span class="muted">'+safeRound(d0.temperature_2m_min && d0.temperature_2m_min[j])+'°</span></div>'+
+          '<div class="muted small">Szél: '+safeRound(d0.wind_speed_10m_max && d0.wind_speed_10m_max[j])+' '+(state.units==='metric'?'km/h':'mph')+'</div>'+
+        '</div>');
       }
       $('#daily').innerHTML = rows.join('');
       $('#dailyRange').textContent = niceDate(d0.time[0]) + ' – ' + niceDate(d0.time[d0.time.length-1]);
@@ -524,78 +648,55 @@
     resizeCanvases(); drawBase(); drawRadar();
   }
 
-  /* ===== UI helpers ===== */
-  function skeleton(active){
-    $('#temp').textContent = active ? '—°' : $('#temp').textContent;
-    $('#updated').textContent = active ? 'Frissítés…' : 'Most frissítve';
-  }
-  function toast(msg, kind='ok', ms=1800){
-    const el = document.createElement('div');
-    el.textContent = msg;
-    el.style.position='fixed'; el.style.left='50%'; el.style.bottom='22px'; el.style.transform='translateX(-50%)';
-    el.style.background= kind==='ok'? '#10b981' : kind==='warn'? '#f59e0b' : '#ef4444';
-    el.style.color='#001018'; el.style.padding='10px 14px'; el.style.borderRadius='999px'; el.style.boxShadow='0 10px 30px rgba(0,0,0,.35)'; el.style.fontWeight='700';
-    el.style.zIndex=9999; el.style.opacity='0'; el.style.transition='opacity .2s ease';
-    document.body.appendChild(el); requestAnimationFrame(()=> el.style.opacity='1');
-    setTimeout(()=>{ el.style.opacity='0'; setTimeout(()=>el.remove(),200); }, ms);
-  }
-  function shake(input){
-    const el = input.closest('.search');
-    el.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],{duration:260});
-    input.focus();
-  }
-  function svgUse(id,size,cls){ if(size===void 0) size=48; if(!cls) cls=''; return '<svg class="'+cls+'" width="'+size+'" height="'+size+'" viewBox="0 0 24 24" aria-hidden="true"><use href="#'+id+'"/></svg>'; }
-  function safeRound(x){ const n=Number(x); return isFinite(n)?Math.round(n):'—'; }
-  function pad(n){ return n<10?'0'+n:n; }
-  function formatTime(s){ const d=new Date(s); return pad(d.getHours())+':'+pad(d.getMinutes()); }
-  function niceDate(s){ const d=new Date(s); return d.toLocaleDateString('hu-HU',{month:'short',day:'2-digit',weekday:'short'}); }
-  function nearestIndex(arr, iso){ const now=+new Date(iso); let i=-1; for(let k=0;k<arr.length;k++){ if(+new Date(arr[k])>=now){ i=k; break; } } return i<0?0:i; }
-  function guessIsDay(iso, sr, ss){ const t=+new Date(iso), a=+new Date(sr), b=+new Date(ss); return t>=a && t<b; }
-  function tileHour(o){
-    const label = new Date(o.time).toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit'});
-    const popLine = (o.pop!=null)?('Csap.: '+o.pop+'%'):'\u00A0';
-    const windUnit = (state.units==='metric'?'km/h':'mph');
-    return '<div class="tile" title="'+label+'">'+
-      svgUse(pickIcon(o.wcode, o.isDay),40, iconClass(o.wcode,o.isDay))+
-      '<div><strong>'+o.temp+'°</strong></div>'+
-      '<div class="muted small">'+label+'</div>'+
-      '<div class="muted small">'+popLine+'</div>'+
-      '<div class="muted small">Szél: '+o.wind+' '+windUnit+'</div>'+
-    '</div>';
-  }
-  function rowDay(o){
-    const name = new Date(o.date).toLocaleDateString('hu-HU',{weekday:'long'});
-    const windUnit = (state.units==='metric'?'km/h':'mph');
-    const popTxt = (o.pop!=null)?('Csap.: '+o.pop+'%'):'—';
-    return '<div class="dayrow"><div class="row" style="display:flex; gap:12px">'+
-      svgUse(pickIcon(o.wcode,true),26, iconClass(o.wcode,true))+
-      '<div><strong>'+name+'</strong><div class="muted small">'+new Date(o.date).toLocaleDateString('hu-HU',{month:'long',day:'2-digit'})+'</div></div>'+
-      '</div><div class="muted small">'+popTxt+
-      '</div><div class="row" style="display:flex; align-items:center; gap:6px"><strong>'+o.tmax+'°</strong> <span class="muted">/</span> <span class="muted">'+o.tmin+'°</span></div>'+
-      '<div class="muted small">Szél: '+o.wind+' '+windUnit+'</div></div>';
-  }
+  /* ========= 8) ANIMÁLT IKON RENDER ========= */
+  function animatedIcon(wmo, isDay, size){
+    const cls = iconClass(wmo, isDay);
+    const s = size||48;
+    const sun = `<g class="ico-sun ${cls}">
+      <circle cx="12" cy="12" r="4" fill="currentColor" opacity="0.95"/>
+      <g class="rays" stroke="currentColor" stroke-width="2">
+        ${Array.from({length:8}).map((_,i)=>{
+          const a = i*45, x1=12+7*Math.cos(a*Math.PI/180), y1=12+7*Math.sin(a*Math.PI/180),
+                x2=12+10*Math.cos(a*Math.PI/180), y2=12+10*Math.sin(a*Math.PI/180);
+          return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" />`;
+        }).join('')}
+      </g>
+    </g>`;
+    const cloud = `<g class="ico-cloud ${cls}">
+      <path class="cloud" fill="currentColor" d="M7 16a3 3 0 1 1 0-6c.9 0 1.7.4 2.3 1.1A4.5 4.5 0 0 1 17 9.5a4.5 4.5 0 0 1 0 9H7z"/>
+    </g>`;
+    const rain = `<g class="ico-rain ${cls}">
+      ${cloud}
+      ${[8,12,16].map((x,i)=>`<path class="drop" d="M${x} 17 l1.5 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" style="animation-delay:${i*0.25}s"/>`).join('')}
+    </g>`;
+    const snow = `<g class="ico-snow ${cls}">
+      ${cloud}
+      ${[8,12,16].map((x,i)=>`<path class="flake" d="M${x} 18 l0 2 M${x-1} 19 l2 0 M${x-1} 18.5 l2 1 M${x-1} 19.5 l2 -1"
+         stroke="currentColor" stroke-width="1.2" stroke-linecap="round" style="animation-delay:${i*0.35}s"/>`).join('')}
+    </g>`;
+    const mist = `<g class="ico-mist ${cls}">
+      <rect class="band" x="3" y="10" width="18" height="1.2" fill="currentColor" opacity=".8"/>
+      <rect class="band" x="3" y="13" width="18" height="1.2" fill="currentColor" opacity=".7" style="animation-delay:.4s"/>
+      <rect class="band" x="3" y="16" width="18" height="1.2" fill="currentColor" opacity=".6" style="animation-delay:.8s"/>
+    </g>`;
+    const thunder = `<g class="ico-thunder ${cls}">
+      ${cloud}
+      <path class="bolt" d="M12 12 l3 -5 h-2 l1 -3 l-3 5 h2 z" fill="currentColor" opacity=".7"/>
+    </g>`;
+    const partly = `<g class="${cls}">${sun}<g transform="translate(5,4)">${cloud}</g></g>`;
+    const night = `<g class="${cls}"><path d="M14.5 5.5a6 6 0 1 0 4 9.5a6.5 6.5 0 1 1 -4-9.5z" fill="currentColor" opacity=".95"/></g>`;
 
-  function describeWMO(code){
-    const m = {0:'Derült',1:'Többnyire derült',2:'Változó felhőzet',3:'Borult',45:'Köd',48:'Zúzmarás köd',
-      51:'Gyenge szitálás',53:'Mérsékelt szitálás',55:'Erős szitálás',56:'Gyenge ónos szitálás',57:'Erős ónos szitálás',
-      61:'Gyenge eső',63:'Eső',65:'Erős eső',66:'Gyenge ónos eső',67:'Erős ónos eső',71:'Gyenge havazás',73:'Havazás',
-      75:'Erős havazás',77:'Hódara',80:'Záporok',81:'Erős zápor',82:'Felhőszakadás',85:'Hózápor',86:'Erős hózápor',
-      95:'Zivatar',96:'Zivatar jéggel',99:'Erős zivatar jéggel'}; return (m[code]||'—');
-  }
-  function persist(){ localStorage.setItem('weather:last', JSON.stringify({ units:state.units, place:state.place })); }
+    let body = cloud;
+    if(wmo===0) body = isDay? sun : night;
+    else if(wmo===1||wmo===2) body = partly;
+    else if(wmo===3) body = cloud;
+    else if(wmo===45||wmo===48) body = mist;
+    else if([51,53,55,56,57].includes(wmo)) body = rain;
+    else if([61,63,65,66,67,80,81,82].includes(wmo)) body = rain;
+    else if([71,73,75,77,85,86].includes(wmo)) body = snow;
+    else if([95,96,99].includes(wmo)) body = thunder;
 
-  /* ===== Ikon választás ===== */
-  function pickIcon(wmo, isDay){
-    if(wmo==null) return 'i-cloud';
-    if(wmo===0) return isDay?'i-clear-day':'i-clear-night';
-    if(wmo===1||wmo===2) return 'i-partly';
-    if(wmo===3) return 'i-cloud';
-    if(wmo===45||wmo===48) return 'i-mist';
-    if(wmo===51||wmo===53||wmo===55||wmo===56||wmo===57) return 'i-shower';
-    if(wmo===61||wmo===63||wmo===65||wmo===66||wmo===67||wmo===80||wmo===81||wmo===82) return 'i-rain';
-    if(wmo===71||wmo===73||wmo===75||wmo===77||wmo===85||wmo===86) return 'i-snow';
-    if(wmo===95||wmo===96||wmo===99) return 'i-thunder';
-    return 'i-cloud';
+    return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
   }
   function iconClass(wmo,isDay){
     if(wmo==null) return 'wc-cloud';
@@ -603,14 +704,14 @@
     if(wmo===1||wmo===2) return 'wc-partly';
     if(wmo===3) return 'wc-cloud';
     if(wmo===45||wmo===48) return 'wc-mist';
-    if(wmo===51||wmo===53||wmo===55||wmo===56||wmo===57) return 'wc-shower';
-    if(wmo===61||wmo===63||wmo===65||wmo===66||wmo===67||wmo===80||wmo===81||wmo===82) return 'wc-rain';
-    if(wmo===71||wmo===73||wmo===75||wmo===77||wmo===85||wmo===86) return 'wc-snow';
-    if(wmo===95||wmo===96||wmo===99) return 'wc-thunder';
+    if([51,53,55,56,57].includes(wmo)) return 'wc-shower';
+    if([61,63,65,66,67,80,81,82].includes(wmo)) return 'wc-rain';
+    if([71,73,75,77,85,86].includes(wmo)) return 'wc-snow';
+    if([95,96,99].includes(wmo)) return 'wc-thunder';
     return 'wc-cloud';
   }
 
-  /* ======== MAP + RADAR (CANVAS) – rács nélkül ======== */
+  /* ========= 9) RADAR (CANVAS) ========= */
   const mapEl = $('#map'), baseCanvas = $('#baseCanvas'), radarCanvas = $('#radarCanvas'), dotsEl = $('#dots'), timeLabel = $('#timeLabel');
   const bctx = baseCanvas.getContext('2d'), rctx = radarCanvas.getContext('2d');
   const TILE = 256;
@@ -668,7 +769,7 @@
     eachVisibleTiles(({z,x,y,dx,dy})=>{
       const url = osmURL(z,x,y);
       loadImg(url).then(im=>{
-        bctx.drawImage(im, 0,0,TILE,TILE, dx-0.5, dy-0.5, TILE+1, TILE+1); // 1px átfedés
+        bctx.drawImage(im, 0,0,TILE,TILE, dx-0.5, dy-0.5, TILE+1, TILE+1);
       }).catch(()=>{ /* ignore */ });
     });
   }
@@ -703,7 +804,7 @@
     eachVisibleTiles(({z,x,y,dx,dy})=>{
       const url = radarURL(fr.time, z, x, y);
       loadImg(url).then(im=>{
-        rctx.drawImage(im, 0,0,TILE,TILE, dx-0.5, dy-0.5, TILE+1, TILE+1); // 1px átfedés
+        rctx.drawImage(im, 0,0,TILE,TILE, dx-0.5, dy-0.5, TILE+1, TILE+1);
       }).catch(()=>{ /* ignore */ });
     });
     const dt = new Date(fr.time*1000);
@@ -716,7 +817,6 @@
   function pause(){ radar.playing=false; if(radar.timer){ clearInterval(radar.timer); radar.timer=null; } }
   $('#radarPlay').onclick = play; $('#radarPause').onclick = pause; $('#radarNow').onclick = ()=>{ radar.idx=Math.max(0,radar.frames.length-1); drawRadar(); };
 
-  // Interakciók
   $('#zoomIn').onclick = ()=>{ state.map.z = Math.min(12, state.map.z+1); drawBase(); drawRadar(); };
   $('#zoomOut').onclick = ()=>{ state.map.z = Math.max(2, state.map.z-1); drawBase(); drawRadar(); };
   $('#locate').onclick = ()=>{ if(state.place) mapCenter(state.place.lat, state.place.lon, Math.max(8,state.map.z)); };
@@ -736,16 +836,32 @@
   // init
   resizeCanvases(); drawBase(); loadFrames();
 
-  /* ===== kis utilok ===== */
+  /* ========= 10) KIS SEGÉDEK ========= */
+  function persist(){ localStorage.setItem('weather:last', JSON.stringify({ units:state.units, place:state.place })); }
+  function debounce(fn,ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+  function escapeHTML(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+  function flag(cc){ if(!cc) return '🌍'; const u=String(cc).toUpperCase(); return String.fromCodePoint(0x1F1E6+u.charCodeAt(0)-65, 0x1F1E6+u.charCodeAt(1)-65); }
+  function safeRound(x){ const n=Number(x); return isFinite(n)?Math.round(n):'—'; }
+  function shake(input){ const el = input.closest('.search'); el.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],{duration:260}); input.focus(); }
+  function pad(n){ return n<10?'0'+n:n; }
   function formatTime(s){ const d=new Date(s); return pad(d.getHours())+':'+pad(d.getMinutes()); }
   function niceDate(s){ const d=new Date(s); return d.toLocaleDateString('hu-HU',{month:'short',day:'2-digit',weekday:'short'}); }
-  function pad(n){ return n<10?'0'+n:n; }
   function nearestIndex(arr, iso){ const now=+new Date(iso); let i=-1; for(let k=0;k<arr.length;k++){ if(+new Date(arr[k])>=now){ i=k; break; } } return i<0?0:i; }
   function guessIsDay(iso, sr, ss){ const t=+new Date(iso), a=+new Date(sr), b=+new Date(ss); return t>=a && t<b; }
-  function svgUse(id,size,cls){ if(size===void 0) size=48; if(!cls) cls=''; return '<svg class="'+cls+'" width="'+size+'" height="'+size+'" viewBox="0 0 24 24" aria-hidden="true"><use href="#'+id+'"/></svg>'; }
-  function safeRound(x){ const n=Number(x); return isFinite(n)?Math.round(n):'—'; }
-  function persist(){ localStorage.setItem('weather:last', JSON.stringify({ units:state.units, place:state.place })); }
-})(); // IIFE vége
+  function showOffline(v){ OFFLINE_BADGE.classList.toggle('show', !!v); }
+  function skeleton(active){ $('#updated').textContent = active ? 'Frissítés…' : (state.offline?'Utolsó mentett adatok':'Most frissítve'); }
+  function toast(msg, kind='ok', ms=1800){
+    const el = document.createElement('div');
+    el.textContent = msg;
+    el.style.position='fixed'; el.style.left='50%'; el.style.bottom='22px'; el.style.transform='translateX(-50%)';
+    el.style.background= kind==='ok'? '#10b981' : kind==='warn'? '#f59e0b' : '#ef4444';
+    el.style.color='#001018'; el.style.padding='10px 14px'; el.style.borderRadius='999px'; el.style.boxShadow='0 10px 30px rgba(0,0,0,.35)'; el.style.fontWeight='700';
+    el.style.zIndex=9999; el.style.opacity='0'; el.style.transition='opacity .2s ease';
+    document.body.appendChild(el); requestAnimationFrame(()=> el.style.opacity='1');
+    setTimeout(()=>{ el.style.opacity='0'; setTimeout(()=>el.remove(),200); }, ms);
+  }
+
+})(); // IIFE
 </script>
 </body>
 </html>
